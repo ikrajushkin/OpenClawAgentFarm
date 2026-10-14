@@ -1,0 +1,12 @@
+REPOSITORY                 TAG         DIGEST                                                                    IMAGE ID       CREATED        SIZE
+basip-test                 local       sha256:08749ab540e0e81e0055b5c785f86d1ada9ed9f198fbea15f7ed996d5c344d83   08749ab540e0   2 weeks ago    968MB
+basip-monitor-app          latest      sha256:82028320cd22c11361d107750c85eb2485e5a278625f7656996441b9afa95f1b   82028320cd22   2 weeks ago    968MB
+alpine                     latest      sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6   294b683cb724   3 weeks ago    13MB
+basip-migration-test-app   latest      sha256:e0866208f3c366a82aa0c3ff4162e5723d507cc1c0aa53c2f77604604c8392bb   e0866208f3c3   4 weeks ago    972MB
+basip-smoke-app            latest      sha256:3828b977c476f53d3d3dcbe18d575fa3ebe973d98411a30177969b4eab00f2f7   3828b977c476   4 weeks ago    971MB
+nextcloud-shared           34          sha256:8e6cc884944590fd79cf065aed583f257ace8794c5ee7efa3da6f10b5d1d938e   8e6cc8849445   6 weeks ago    2.19GB
+nextcloud                  apache      sha256:da8a54816fca90e2de7cba27e5d476ed00db55ab9aade462f926db8c1463245b   da8a54816fca   7 weeks ago    2.19GB
+redis                      7-alpine    sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf   ff02b58f971e   8 weeks ago    57.8MB
+postgres                   16-alpine   sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685   cf78e76683b9   2 months ago   420MB
+postgres                   17-alpine   sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73   18cfe3ef5e68   2 months ago   424MB
+caddy                      2-alpine    sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648   5f5c8640aae0   3 months ago   88.7MB

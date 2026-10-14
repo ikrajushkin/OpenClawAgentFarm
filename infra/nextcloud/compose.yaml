@@ -1,0 +1,108 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: nc-db
+    restart: unless-stopped
+    env_file: [.env]
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    command: >
+      postgres
+      -c shared_buffers=1GB
+      -c effective_cache_size=4GB
+      -c work_mem=16MB
+      -c maintenance_work_mem=256MB
+      -c max_connections=200
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nextcloud -d nextcloud"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [ncnet]
+    mem_limit: 2g
+
+  redis:
+    image: redis:7-alpine
+    container_name: nc-redis
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [ncnet]
+    mem_limit: 768m
+
+  app:
+    build: .
+    image: nextcloud-shared:34
+    container_name: nc-app
+    restart: unless-stopped
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    env_file: [.env]
+    environment:
+      POSTGRES_HOST: db
+      REDIS_HOST: redis
+      OVERWRITEPROTOCOL: https
+      PHP_MEMORY_LIMIT: 768M
+      PHP_UPLOAD_LIMIT: 10G
+    volumes:
+      - ./html:/var/www/html
+      - /srv/shared:/mnt/shared
+    group_add: ["2000"]
+    networks: [ncnet, edge]
+    mem_limit: 3g
+
+  cron:
+    build: .
+    image: nextcloud-shared:34
+    container_name: nc-cron
+    restart: unless-stopped
+    depends_on:
+      app: {condition: service_started}
+    env_file: [.env]
+    environment:
+      POSTGRES_HOST: db
+      REDIS_HOST: redis
+    volumes:
+      - ./html:/var/www/html
+      - /srv/shared:/mnt/shared
+    group_add: ["2000"]
+    entrypoint: /cron.sh
+    networks: [ncnet]
+    mem_limit: 512m
+
+  push:
+    image: nextcloud-shared:34
+    container_name: nc-push
+    restart: unless-stopped
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    env_file: [.env]
+    environment:
+      POSTGRES_HOST: db
+      REDIS_HOST: redis
+      NEXTCLOUD_URL: http://app
+      PORT: 7867
+    volumes:
+      - ./html:/var/www/html
+      - /srv/shared:/mnt/shared
+    group_add: ["2000"]
+    user: "33:33"
+    entrypoint: ["/var/www/html/custom_apps/notify_push/bin/x86_64/notify_push"]
+    command: ["/var/www/html/config/config.php"]
+    networks:
+      ncnet:
+      edge:
+        ipv4_address: 172.18.0.11
+    mem_limit: 256m
+
+networks:
+  ncnet:
+    driver: bridge
+  edge:
+    external: true

@@ -1,0 +1,170 @@
+# Приёмка 1.1: `docker compose up` на чистой машине поднимает систему,
+# /readyz отвечает 200.
+#
+# Запуск из корня репозитория:
+#   docker compose -f docker/docker-compose.yml --env-file .env up -d
+
+name: basip-monitor
+
+# Явная ротация логов docker (ENG §2). Мы чиним у домофонов переполнение
+# журналов — повторять ту же проблему у себя было бы неловко.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_DB: ${BASIP_DB_NAME:-basip}
+      POSTGRES_USER: ${BASIP_DB_USER:-basip}
+      POSTGRES_PASSWORD: ${BASIP_DB_PASSWORD:?переменная BASIP_DB_PASSWORD обязательна}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Без этой проверки app стартует раньше готовности БД и падает
+      # в цикле рестартов — выглядит как «система не поднимается».
+      test: ["CMD-SHELL", "pg_isready -U ${BASIP_DB_USER:-basip} -d ${BASIP_DB_NAME:-basip}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      BASIP_DB_HOST: postgres
+      BASIP_DB_PORT: "5432"
+      BASIP_DB_NAME: ${BASIP_DB_NAME:-basip}
+      BASIP_DB_USER: ${BASIP_DB_USER:-basip}
+      BASIP_DB_PASSWORD: ${BASIP_DB_PASSWORD:?переменная BASIP_DB_PASSWORD обязательна}
+      BASIP_LOG_LEVEL: ${BASIP_LOG_LEVEL:-INFO}
+      # Применяется только при первом старте, когда пользователей нет.
+      BASIP_ADMIN_LOGIN: ${BASIP_ADMIN_LOGIN:-admin}
+      BASIP_ADMIN_PASSWORD: ${BASIP_ADMIN_PASSWORD:-}
+      # На стенде HTTP, поэтому false. За TLS обязательно true.
+      BASIP_COOKIE_SECURE: ${BASIP_COOKIE_SECURE:-false}
+      # Очистка логов: переполнение парализует панель (ENG §6.5.НОЛЬ)
+      BASIP_LOG_CEILING_BYTES: ${BASIP_LOG_CEILING_BYTES:-16777216}
+      BASIP_LOG_MIN_AGE_DAYS: ${BASIP_LOG_MIN_AGE_DAYS:-7}
+      BASIP_LOG_ARCHIVE_RETENTION_DAYS: ${BASIP_LOG_ARCHIVE_RETENTION_DAYS:-7}
+      BASIP_LOG_ARCHIVE_ROOT: /var/lib/basip/archives
+      # Очистка лога на панели. ВЫКЛЮЧЕНА по умолчанию: единственное
+      # действие, меняющее чужое оборудование, и ошибка необратима.
+      BASIP_LOG_CLEAR_ENABLED: ${BASIP_LOG_CLEAR_ENABLED:-false}
+      BASIP_LOG_MIN_CLEAR_FRACTION: ${BASIP_LOG_MIN_CLEAR_FRACTION:-0.5}
+      # Журналы из потока rsyslog вместо скачивания с панелей (ENG §24.47).
+      # Пустой адрес = источник выключен, система работает как раньше.
+      BASIP_SYSLOG_HOST: ${BASIP_SYSLOG_HOST:-}
+      BASIP_SYSLOG_USER: ${BASIP_SYSLOG_USER:-}
+      BASIP_SYSLOG_KEY: ${BASIP_SYSLOG_KEY:-/run/secrets/basip_syslog_key}
+      BASIP_SYSLOG_ROOT: ${BASIP_SYSLOG_ROOT:-/var/log/basip}
+      # Оповещения (ENG §8). Пустые значения = канал не используется.
+      BASIP_TELEGRAM_BOT_TOKEN: ${BASIP_TELEGRAM_BOT_TOKEN:-}
+      BASIP_TELEGRAM_CHAT_ID: ${BASIP_TELEGRAM_CHAT_ID:-}
+      BASIP_MAX_BOT_TOKEN: ${BASIP_MAX_BOT_TOKEN:-}
+      BASIP_MAX_CHAT_ID: ${BASIP_MAX_CHAT_ID:-}
+      BASIP_SMTP_HOST: ${BASIP_SMTP_HOST:-}
+      BASIP_SMTP_PORT: ${BASIP_SMTP_PORT:-587}
+      BASIP_SMTP_USER: ${BASIP_SMTP_USER:-}
+      BASIP_SMTP_PASSWORD: ${BASIP_SMTP_PASSWORD:-}
+      BASIP_SMTP_FROM: ${BASIP_SMTP_FROM:-}
+      BASIP_SMTP_TO: ${BASIP_SMTP_TO:-}
+      BASIP_ALERT_DEDUP_SECONDS: ${BASIP_ALERT_DEDUP_SECONDS:-300}
+      BASIP_ALERTS_ENABLED: ${BASIP_ALERTS_ENABLED:-true}
+      # Предохранители автолечения (блок 12). Рубильник выключен
+      # по умолчанию: забытый переключатель не должен означать
+      # «система сама перезагружает панели».
+      BASIP_AUTO_REMEDIATION_ENABLED: ${BASIP_AUTO_REMEDIATION_ENABLED:-false}
+      BASIP_REMEDIATION_MAX_ATTEMPTS: ${BASIP_REMEDIATION_MAX_ATTEMPTS:-3}
+      BASIP_DEVICE_TZ_OFFSET_MINUTES: ${BASIP_DEVICE_TZ_OFFSET_MINUTES:-180}
+      # Адреса внешних прокси через запятую. Внутренний caddy добавляется
+      # сам резолвом по имени; сюда — тот, что в общей сети edge и живёт
+      # в чужом стеке. Пустое значение безопасно: заголовку просто не верят.
+      BASIP_TRUSTED_PROXIES: ${BASIP_TRUSTED_PROXIES:-127.0.0.1}
+    networks:
+      # Своя сеть — для postgres и внутреннего caddy.
+      - default
+      # Общая edge — там живёт caddy с портами 80/443, который
+      # обслуживает paylama.online. Своего прокси на 80/443 мы не
+      # поднимаем: порты заняты работающим сервисом, и ставить
+      # второй означало бы уронить соседние сайты.
+      - edge
+    volumes:
+      # Архивы обязаны пережить пересборку образа: без сохранённой
+      # копии очистка лога запрещена правилом (ENG §6.5.0).
+      - basip_archives:/var/lib/basip/archives
+    secrets:
+      - basip_master_key
+      # Ключ к серверу логов. Файлом, а не переменной, по той же причине,
+      # что и мастер-ключ: окружение процесса читается из /proc.
+      - basip_syslog_key
+    # Миграции применяются при старте: система обязана подниматься на
+    # чистой машине одной командой, без ручного шага.
+    # --proxy-headers добавлен 16.09.2026. Без него `request.client.host`
+    # возвращал адрес прокси, а не клиента: все посетители из интернета
+    # выглядели одним адресом. Следствие: двадцать неудачных попыток
+    # входа от кого угодно закрывали вход ВСЕМ, а адрес в аудите был
+    # бесполезен. Живая проверка блока 9 делала семь попыток и порога
+    # не достигла — дефект не проявился.
+    #
+    # Заголовку доверяем ТОЛЬКО от своих прокси. Со значением `*` клиент
+    # подставил бы свой X-Forwarded-For и обошёл блокировку или подписал
+    # чужим адресом запись в аудите. uvicorn 0.34 подсети не понимает,
+    # только точные адреса: внутренний прокси резолвится по имени при
+    # старте, внешний (живёт в чужом стеке) задаётся явно в .env.
+    command: >
+      sh -c "alembic upgrade head &&
+             TRUSTED=$$(getent hosts caddy | awk '{print $$1}' | paste -sd, -) &&
+             TRUSTED=$${TRUSTED:+$$TRUSTED,}$${BASIP_TRUSTED_PROXIES:-127.0.0.1} &&
+             echo \"доверенные прокси: $$TRUSTED\" &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips \"$$TRUSTED\""
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      - app
+    ports:
+      - "${BASIP_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+
+secrets:
+  # Мастер-ключ шифрования секретов устройств (ENG §4.3). Именно файл, а
+  # не переменная окружения: окружение процесса читается из /proc и
+  # попадает в дампы.
+  basip_master_key:
+    file: ../secrets/master.key
+
+  # Доступ на чтение каталога логов на rsyslog-сервере (ENG §24.47).
+  # Каталог secrets/ в .gitignore — ключ в репозиторий не попадает.
+  basip_syslog_key:
+    file: ../secrets/syslog.key
+
+networks:
+  default:
+  # Создана вне этого compose — общим прокси. Объявлена внешней,
+  # чтобы наш стек её не пересоздавал и не ломал соседей.
+  edge:
+    external: true
+
+volumes:
+  basip_archives:
+  pgdata:
+  caddydata:
+  caddyconfig:

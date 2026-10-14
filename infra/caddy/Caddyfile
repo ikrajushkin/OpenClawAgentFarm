@@ -1,0 +1,78 @@
+{
+    email maintechlead@yandex.ru
+    admin off
+}
+
+cloud.paylama.tech {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=15768000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+        -Server
+    }
+    redir /.well-known/carddav /remote.php/dav 301
+    redir /.well-known/caldav  /remote.php/dav 301
+    redir /.well-known/webfinger   /index.php/.well-known/webfinger 301
+    redir /.well-known/nodeinfo    /index.php/.well-known/nodeinfo 301
+    request_body {
+        max_size 10GB
+    }
+
+    # notify_push: handle_path срезает префикс /push, как трейлинг-слеш в nginx.
+    # Сам сервис слушает /ws и /test/* в корне.
+    handle_path /push/* {
+        reverse_proxy nc-push:7867 {
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-Proto https
+            header_up X-Forwarded-Host {host}
+        }
+    }
+
+    handle {
+        reverse_proxy nc-app:80 {
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-Proto https
+            header_up X-Forwarded-Host {host}
+        }
+    }
+}
+
+oc.paylama.tech {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=15768000; includeSubDomains"
+        -Server
+    }
+    reverse_proxy 172.18.0.1:18789 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
+}
+
+paylama.online {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=15768000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        -Server
+    }
+
+    # Метрики наружу не отдаём: это инвентарь устройств и адресов объектов
+    handle /metrics* {
+        respond "not found" 404
+    }
+
+    reverse_proxy basip-monitor-app-1:8000 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Host {host}
+    }
+}

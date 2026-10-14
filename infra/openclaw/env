@@ -1,0 +1,3 @@
+CLAUDE_CODE_OAUTH_TOKEN=***MASKED***
+WHISPER_CPP_MODEL=/opt/whisper-models/ggml-medium-q5_0.bin
+WHISPER_CPP_MODEL_DIRS=/opt/whisper-models

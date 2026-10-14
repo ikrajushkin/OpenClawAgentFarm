@@ -1,0 +1,31 @@
+[Unit]
+StartLimitIntervalSec=300
+StartLimitBurst=10
+Description=OpenClaw Gateway
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openclaw
+Group=openclaw
+# Группа shared обязательна: без неё агент не сможет писать в /srv/shared
+SupplementaryGroups=shared
+WorkingDirectory=/srv/openclaw
+Environment=HOME=/srv/openclaw
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/etc/openclaw/env
+# UMask 0002 обязателен: файлы должны быть group-writable для Nextcloud
+UMask=0002
+ExecStart=/usr/local/bin/openclaw gateway run
+Restart=always
+RestartSec=5
+MemoryMax=6G
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/srv/openclaw /srv/shared /tmp
+
+[Install]
+WantedBy=multi-user.target

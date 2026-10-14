@@ -4,3 +4,5 @@
 *.py text eol=lf
 *.sh text eol=lf
 *.bat text eol=crlf
+# Конфиги для Linux-сервера — всегда LF (скармливаются обратно в Linux как есть).
+infra/** text eol=lf
