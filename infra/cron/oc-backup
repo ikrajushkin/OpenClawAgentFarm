@@ -1,0 +1,2 @@
+30 3 * * * root /usr/local/bin/oc-backup.sh
+30 4 * * 0 root /usr/local/bin/oc-restore-test.sh

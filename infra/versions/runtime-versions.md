@@ -17,3 +17,6 @@
 
 Digest-ы Docker-образов — в [`docker-images-digests.txt`](docker-images-digests.txt)
 (колонка `DIGEST` == image ID: RepoDigest для локально собранных образов не сохраняется).
+
+Пины whisper.cpp / Piper / Parakeet (коммиты, md5 моделей, freeze venv) —
+в [`ai-stack-versions.md`](ai-stack-versions.md).

@@ -22,6 +22,10 @@
 | `custom.openclaw.usage.input` | Numeric (unsigned) | 10m | input-токены |
 | `custom.openclaw.usage.output` | Numeric (unsigned) | 10m | output-токены |
 | `custom.openclaw.usage.cache_read` | Numeric (unsigned) | 10m | cache read-токены |
+| `custom.openclaw.backup.status` | Text | 1h | статус последнего бэкапа (`ok`/`error`) |
+| `custom.openclaw.backup.age_hours` | Numeric (unsigned) | 1h | часов с последнего успешного бэкапа |
+| `custom.openclaw.backup.sizeMb` | Numeric (unsigned) | 1h | размер последнего бэкапа, MB |
+| `custom.openclaw.restore.status` | Text | 1h | статус последней restore-дрели (`ok`/`error`) |
 
 ## Триггеры (Triggers)
 
@@ -33,6 +37,9 @@
 | Heartbeat ksu в ошибке | `find(/oc-node1/custom.openclaw.heartbeat.ksu,5m,"like","error")=1` | Warning |
 | Heartbeat service в ошибке | `find(/oc-node1/custom.openclaw.heartbeat.service,5m,"like","error")=1` | Warning |
 | Дневной расход > 50 $ | `last(/oc-node1/custom.openclaw.usage.cost)>50` | Information |
+| Бэкап устарел | `last(/oc-node1/custom.openclaw.backup.age_hours)>30` | High |
+| Бэкап завершился с ошибкой | `last(/oc-node1/custom.openclaw.backup.status)<>"ok"` | High |
+| Restore-дрель не прошла | `last(/oc-node1/custom.openclaw.restore.status)<>"ok"` | Warning |
 
 ## Примечания
 
