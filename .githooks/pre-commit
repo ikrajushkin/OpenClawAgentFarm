@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# pre-commit — граф знаний должен быть актуален (docs/Граф-знаний.md == рёбра `Связи[…]`).
+# Включить в клоне однократно:  git config core.hooksPath .githooks
+PY="$(command -v python || command -v python3 || true)"
+if [ -z "$PY" ]; then
+  echo "pre-commit: python не найден — пропускаю проверку графа связей" >&2
+  exit 0
+fi
+if ! "$PY" scripts/gen-knowledge-graph.py --check; then
+  echo "" >&2
+  echo "── pre-commit ОТКЛОНЁН: граф знаний устарел ──" >&2
+  echo "  Перегенерируй и добавь в коммит:" >&2
+  echo "    python scripts/gen-knowledge-graph.py && git add docs/Граф-знаний.md" >&2
+  echo "  (обойти при необходимости: git commit --no-verify)" >&2
+  exit 1
+fi
