@@ -13,4 +13,9 @@
   (на сервере: `/usr/local/bin/openclaw-usage-refresh.sh`, вызов от root через `runuser -u openclaw`);
 - `zabbix/openclaw-usage.conf` — UserParameter `custom.openclaw.usage.{cost,tokens,input,output,cache_read}`
   (на сервере: `/etc/zabbix/zabbix_agentd.d/openclaw.conf`);
-- `cron/openclaw-metrics` — `/etc/cron.d/openclaw-metrics`, запуск refresh каждые 10 минут.
+- `cron/openclaw-metrics` — `/etc/cron.d/openclaw-metrics`, запуск refresh каждые 10 минут;
+- `openclaw/health-refresh.sh` — сбор health-метрик (gateway/cron/heartbeats) в
+  `/var/lib/openclaw-metrics/health.json` (на сервере: `/usr/local/bin/openclaw-health-refresh.sh`);
+- `zabbix/openclaw-health.conf` — UserParameter `custom.openclaw.gateway.active`,
+  `custom.openclaw.cron.{jobs,errors}`, `custom.openclaw.heartbeat.{main,ksu,service}`;
+- `zabbix/openclaw-triggers.md` — спецификация элементов данных и триггеров для Zabbix-сервера (OPF-6).

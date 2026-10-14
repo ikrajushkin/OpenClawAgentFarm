@@ -1,1 +1,2 @@
 */10 * * * * root /usr/local/bin/openclaw-usage-refresh.sh
+*/10 * * * * root /usr/local/bin/openclaw-health-refresh.sh

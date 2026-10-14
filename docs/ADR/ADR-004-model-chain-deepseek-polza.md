@@ -30,3 +30,20 @@
 Текст ADR выше («токен остаётся авторизованным…») относится к периоду **до 2026-10-14**. Текущее состояние:
 авторизация **только** провайдеры `polza*`; при деградации polza резерв через Anthropic потребует
 повторной авторизации (`oc models auth login --provider anthropic`).
+
+---
+
+## Дополнение 2026-10-14 — схема ключей polza vs polza-ksu (OPF-7)
+
+Разделение расходов между агентами подтверждено фактами `oc models status`:
+
+- `main`, `service` → профиль **`polza-ds`**: `polza-ds/deepseek/deepseek-v4.1-flash`, фолбэки
+  `polza-ds/deepseek/deepseek-v4-flash` и `polza-ds/deepseek/deepseek-v4-flash-0731`;
+- `ksu` → отдельный профиль **`polza-ksu-ds`**: те же модели DeepSeek, но **свой API-ключ `pza_*`** —
+  расход агента `ksu` учитывается отдельно от общего.
+
+Схема: **один провайдерский профиль = один «кошелёк»** — общий `polza-ds` (main + service) и
+персональный `polza-ksu-ds` (ksu). Ключи хранятся в состоянии OpenClaw (auth-store агентов),
+в git и в `infra/` не копируются; в `/etc/openclaw/env` переменных polza нет. Каталог моделей
+`polza/anthropic/*`, `polza/qwen/*` в `agents.defaults.models` — резервный, в цепочку не входит.
+При заведении новых агентов решение «общий или отдельный кошелёк» принимать сразу и отражать здесь.
