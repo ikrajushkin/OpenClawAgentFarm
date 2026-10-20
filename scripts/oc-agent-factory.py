@@ -9,7 +9,8 @@
   validate — проверка анкет и библиотек agents/_*.yaml
   plan     — diff «анкета → конфиг» по управляемым поддеревьям; exit 2, если есть изменения
   new      — анкета нового агента из библиотек (stack → model/models/modelPolicy.allow,
-             toolset → tools, role → subagents); origin: factory
+             toolset → tools, role → subagents, --channel type:account → settings
+             из пресета agents/_channels.yaml); origin: factory
   edit     — точечные правки анкеты (--set path=value / --unset path)
   apply    — validate → план → бэкап конфига → oc config patch --dry-run → запись
              → каркас каталогов новых агентов → контрольный plan (0 изменений)
@@ -523,11 +524,36 @@ def cmd_new(args, agents_dir, libs):
         sys.exit("new: toolset «%s» не найден в _toolsets.yaml" % toolset_name)
 
     channels = []
+    chan_lib = libs.get("_channels") or {}
     for spec in args.channel or []:
         ctype, sep, account = spec.partition(":")
         if not sep or not account:
             sys.exit("new: --channel ждёт type:account, получено «%s»" % spec)
-        channels.append({"type": ctype, "account": account})
+        node = chan_lib.get(ctype)
+        if node is None:
+            sys.exit("new: канал «%s» не найден в _channels.yaml" % ctype)
+        if node.get("kind") == "plugin":
+            sys.exit("new: «%s» — плагин (kind: plugin), а не канал; подключение "
+                     "вручную — см. agents/_channels.yaml" % ctype)
+        if node.get("disabled"):
+            sys.exit("new: канал «%s» отключён в _channels.yaml (disabled: true)"
+                     % ctype)
+        presets = node.get("presets") or {}
+        preset_name = node.get("default")
+        if not preset_name and len(presets) == 1:
+            preset_name = next(iter(presets))
+        if not preset_name and len(presets) > 1:
+            sys.exit("new: у канала «%s» несколько пресетов (%s) — задайте default "
+                     "в _channels.yaml" % (ctype, ", ".join(sorted(presets))))
+        entry = {"type": ctype, "account": account}
+        if preset_name:
+            entry["preset"] = preset_name
+            tmpl = (presets.get(preset_name) or {}).get("settingsTemplate")
+            if tmpl:
+                entry["settings"] = copy.deepcopy(tmpl)
+                print("  канал %s/%s: settings из пресета «%s» — проверьте "
+                      "tokenFile/секреты и allowFrom" % (ctype, account, preset_name))
+        channels.append(entry)
 
     doc = {"apiVersion": API_VERSION, "kind": KIND, "id": agent_id,
            "origin": "factory"}
@@ -603,12 +629,11 @@ def cmd_apply(config_path, agents_dir, libs, ids, dry_run=False, yes=False,
     --simulate PATH: прогнать merge-семантику локально, записать смерженный конфиг
     в PATH и не трогать реальный конфиг/сервер.
     """
-    if cmd_validate(agents_dir, libs) != 0:
-        print("apply: validate провален — ничего не применяю")
-        return 1
-
     with open(config_path, encoding="utf-8") as fh:
         cfg = json.load(fh)
+    if cmd_validate(agents_dir, libs, cfg=cfg) != 0:
+        print("apply: validate провален — ничего не применяю")
+        return 1
     docs, _ = load_docs(agents_dir)
     if ids:
         wanted = set(ids)
@@ -910,13 +935,14 @@ def check_secret_refs(node, where, problems, warns, check_secrets):
             check_secret_refs(item, where, problems, warns, check_secrets)
 
 
-def cmd_validate(agents_dir, libs, check_secrets=False):
+def cmd_validate(agents_dir, libs, check_secrets=False, cfg=None):
     docs, errors = load_docs(agents_dir)
     problems = list(errors)   # блокируют (exit 1)
     warns = []                # не блокируют (exit 0)
     stacks = libs.get("_stacks") or {}
     toolsets = libs.get("_toolsets") or {}
     roles = libs.get("_roles") or {}
+    chan_lib = libs.get("_channels") or {}
     seen_ids = {}
 
     for fname, doc in docs:
@@ -1003,10 +1029,24 @@ def cmd_validate(agents_dir, libs, check_secrets=False):
         check_secret_refs(doc.get("channels") or [], where, problems, warns,
                           check_secrets)
 
-        # Каналы: type/account обязательны.
+        # Каналы: type/account обязательны; тип — из _channels.yaml; пресеты
+        # kind: plugin каналом не являются; disabled-каналы не использовать.
         for chan in doc.get("channels") or []:
             if not chan.get("type") or not chan.get("account"):
                 problems.append("%s: канал без type/account: %s" % (where, chan))
+                continue
+            ctype = chan.get("type")
+            node = chan_lib.get(ctype)
+            if node is None:
+                problems.append("%s: канал type=%s не найден в _channels.yaml"
+                                % (where, ctype))
+            elif node.get("kind") == "plugin":
+                problems.append("%s: type=%s — плагин (kind: plugin), не канал "
+                                "(подключение вручную, см. _channels.yaml)"
+                                % (where, ctype))
+            elif node.get("disabled"):
+                problems.append("%s: канал type=%s отключён в _channels.yaml"
+                                % (where, ctype))
 
     # Конфликт претензий на settings канала с scope=channel.
     claims = {}
@@ -1019,6 +1059,22 @@ def cmd_validate(agents_dir, libs, check_secrets=False):
                                     "анкетах: %s и %s" % (ctype, claims[ctype], fname))
                 else:
                     claims[ctype] = fname
+
+    # Плагиновые пресеты: pluginId должен быть в plugins.allow живого конфига
+    # (план §9: «пресет канала = +id в allowlist»). Bundled-каналы id не требуют —
+    # их плагин активируется сам при enabled: true (oc config schema, 2026-10-20).
+    if cfg is not None:
+        allow = ((cfg.get("plugins") or {}).get("allow")) or []
+        for ctype, node in sorted(chan_lib.items()):
+            if (node or {}).get("kind") != "plugin":
+                continue
+            pid = node.get("pluginId") or ctype
+            if allow and pid not in allow:
+                warns.append("_channels.yaml: плагин «%s» (пресеты: %s) не в "
+                             "plugins.allow (%d id) — для подключения добавить id"
+                             % (pid,
+                                ", ".join(sorted((node.get("presets") or {}))),
+                                len(allow)))
 
     print("validate: %d анкет, %d ошибок, %d предупреждений"
           % (len(docs), len(problems), len(warns)))
@@ -1109,7 +1165,7 @@ def cmd_plan(cfg, agents_dir, libs, emit_patch=None):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="oc-agent-factory",
-                                 description="«Фабрика агентов» OPF-8 (E2: "
+                                 description="«Фабрика агентов» OPF-8 (E2–E3: "
                                              "new/edit/export/validate/plan/apply/destroy)")
     ap.add_argument("command",
                     choices=("new", "edit", "export", "validate", "plan",
@@ -1161,7 +1217,11 @@ def main(argv=None):
     if args.command == "edit":
         return cmd_edit(args, args.agents_dir)
     if args.command == "validate":
-        return cmd_validate(args.agents_dir, libs, args.check_secrets)
+        cfg = None
+        if os.path.exists(args.config):
+            with open(args.config, encoding="utf-8") as fh:
+                cfg = json.load(fh)
+        return cmd_validate(args.agents_dir, libs, args.check_secrets, cfg)
 
     if not os.path.exists(args.config):
         sys.exit("НЕТ конфига: %s" % args.config)

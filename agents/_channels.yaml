@@ -1,22 +1,32 @@
 # Библиотека пресетов каналов «Фабрика агентов» (OPF-8) — матрица каналов (T4).
-# Ключ верхнего уровня — ТИП канала (telegram/max/...): по нему factory определяет scope.
+# Источник фактов: oc config schema (OpenClaw 2026.8.2, снято 2026-10-20),
+# манифесты dist/extensions/{imap,webhooks}/openclaw.plugin.json, docs (Nextcloud Talk).
+# Ключ верхнего уровня — ТИП канала (telegram/max/nextcloud-talk) либо id плагина
+# (imap/webhooks: kind: plugin — их конфиг живёт в plugins.entries.<id>.config,
+# каналом не является, через channels[] анкеты не подключается).
 # scope определяет, куда попадают settings анкеты:
-#   account — channels.<type>.accounts.<account> (telegram: у каждого бота свой аккаунт)
+#   account — channels.<type>.accounts.<account>
 #   channel — channels.<type> целиком (max: настройки живут на уровне канала)
-# Статус каналов 2026-10-14: telegram ×3 и max ×1 живы; nextcloud-talk/imap/webhooks
-# есть в схеме как плагины, но НЕ подключены (не в plugins.allow) — включение
-# планом этапа E3, не включать вручную.
+# settingsTemplate применяется при `new --channel type:account`, далее правится
+# в анкете verbatim. Секреты — только *File-пути и ${ENV}-ссылки (README, п.2).
+# Плагины: bundled-каналы (telegram/max/nextcloud-talk) активируют свой плагин сами
+# при enabled: true — id в plugins.allow НЕ требуется (поправка к плану §5, E3);
+# плагины imap/webhooks (stock, сейчас disabled) при подключении требуют
+# +id в plugins.allow и plugins.entries.<id>.enabled=true.
 
 telegram:
   scope: account
   presets:
     telegram-bot:
-      description: "Telegram Bot API, tokenFile — отдельный на бота"
+      description: "Telegram Bot API; tokenFile — отдельный на бота"
       settingsTemplate:
         enabled: true
         dmPolicy: allowlist
         dmHistoryLimit: 0
         historyLimit: 0
+      secrets:
+        - /srv/openclaw/secrets/telegram-<bot>.token
+      notes: "tokenFile и allowFrom задаются в анкете (у каждого бота свой аккаунт)"
 
 max:
   scope: channel
@@ -26,25 +36,86 @@ max:
       settingsTemplate:
         dmPolicy: allowlist
         groupPolicy: allowlist
+      secrets:
+        - /srv/openclaw/secrets/max-bot.token
+      notes: "tokenFile и allowFrom задаются в анкете; схема: channels.max.*"
 
 nextcloud-talk:
   scope: account
-  disabled: true
   presets:
-    nextcloud-talk-bot:
-      description: "Nextcloud Talk — плагин существует, НЕ подключён (E3)"
+    nc-talk:
+      description: "Nextcloud Talk (bundled-канал; доставка вебхуком через Caddy)"
+      settingsTemplate:
+        enabled: true
+        baseUrl: https://cloud.paylama.tech
+        apiUser: openclaw-bot
+        apiPasswordFile: /srv/openclaw/secrets/nc-talk-api.pass
+        botSecretFile: /srv/openclaw/secrets/nc-talk-bot.secret
+        dmPolicy: allowlist
+        groupPolicy: allowlist
+        allowFrom: []
+        dmHistoryLimit: 0
+        historyLimit: 0
+      secrets:
+        - /srv/openclaw/secrets/nc-talk-api.pass   # API/app-password учётки apiUser
+        - /srv/openclaw/secrets/nc-talk-bot.secret # bot secret Spreed Bot API
+      notes: >
+        allowFrom/groupAllowFrom — user ID (или accessGroup:<name>); mediaAllowFrom
+        не задан = fail closed. *File — обычные файлы, симлинки отвергаются.
+        Вебхук: webhookPath=/nextcloud-talk-webhook + webhookPublicUrl через Caddy.
+        Схема: channels.nextcloud-talk.* (oc config schema + docs, 2026-10-20).
 
 imap:
-  scope: account
-  disabled: true
+  kind: plugin
+  pluginId: imap
   presets:
     mail-imap:
-      description: "Почтовый ящик (IMAP) — плагин существует, НЕ подключён (E3)"
+      description: "Почтовый ящик (IMAP -> TaskFlow агента); конфиг плагина imap"
+      configTemplate:
+        accounts:
+          ops-mail:
+            host: imap.example.com
+            port: 993
+            user: bot@example.com
+            password: "${OC_IMAP_OPS_PASS}"
+            agentId: service
+            watch: {mode: auto, pollSeconds: 60}
+            allowedSenders: []
+            senderAuth: {min: verified}
+            includeBody: true
+            maxBytes: 20000
+            deliver: false
+      secrets:
+        - env:OC_IMAP_OPS_PASS
+      notes: >
+        Подключение: +id imap в plugins.allow, plugins.entries.imap.enabled=true,
+        конфиг — plugins.entries.imap.config (configTemplate). Обязательны host,
+        user, password, agentId. allowedSenders — адреса/@domain, кто может
+        триггерить; senderAuth.min держать verified (unverified/mutable и
+        acceptTrustedAuthservId — dangerous-флаги манифеста). Исходящая почта —
+        отдельный SMTP-скрипт (план §5). Схема:
+        dist/extensions/imap/openclaw.plugin.json (2026-10-20).
 
 webhooks:
-  scope: account
-  disabled: true
+  kind: plugin
+  pluginId: webhooks
   presets:
     webhook-in:
-      description: "Входящие webhooks (Bitrix24 и пр.) — плагин существует, НЕ подключён; "
-      description2: "сами вебхуки сейчас идут через service (OPF-7, mos.ru)"
+      description: "Входящие webhooks (Zabbix/GitHub/Bitrix24) -> TaskFlow; конфиг плагина webhooks"
+      configTemplate:
+        routes:
+          zabbix:
+            enabled: true
+            path: /hooks/zabbix
+            sessionKey: zabbix-alerts
+            secret: "${OC_WEBHOOK_ZABBIX_SECRET}"
+            controllerId: service
+            description: "Zabbix-алерты (OPF-6)"
+      secrets:
+        - env:OC_WEBHOOK_ZABBIX_SECRET
+      notes: >
+        Подключение: +id webhooks в plugins.allow, plugins.entries.webhooks.enabled=true,
+        конфиг — plugins.entries.webhooks.config (configTemplate). Обязательны
+        sessionKey и secret. Сегодня входящие вебхуки (mos.ru) идут через service
+        (OPF-7) — пресет задел на будущее. Схема:
+        dist/extensions/webhooks/openclaw.plugin.json (2026-10-20).

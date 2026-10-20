@@ -19,3 +19,9 @@ coding:
   tools:
     profile: coding
     alsoAllow: [browser, web_search, web_fetch]
+
+research:
+  description: "Разведка и анализ: веб-поиск и чтение, без правок файлов (план §2.1)"
+  tools:
+    profile: messaging
+    alsoAllow: [web_search, web_fetch, browser]
