@@ -1,0 +1,55 @@
+# Анкета агента «main» (oc-farm/v1, Agent).
+# Источник истины для agents.entries.main, route-строк bindings и настроек
+# канала. Сгенерировано oc-agent-factory.py export; критерий приёма:
+# plan → «0 изменений». Правки: руками здесь → validate → plan → apply.
+# См. agents/README.md.
+apiVersion: oc-farm/v1
+kind: Agent
+id: main
+origin: migrated
+channels:
+- type: telegram
+  account: default
+  settings:
+    enabled: true
+    name: MainTechOpenClaw
+    tokenFile: /srv/openclaw/secrets/telegram-main.token
+    dmPolicy: allowlist
+    allowFrom:
+    - '10292232'
+    dmHistoryLimit: 0
+    historyLimit: 0
+workspace: /srv/shared/Workspace
+agentDir: /srv/openclaw/.openclaw/agents/main/agent
+identity:
+  name: MainTech
+  emoji: 🏭
+model:
+  primary: polza-ds/deepseek/deepseek-v4.1-flash
+  fallbacks:
+  - polza-ds/deepseek/deepseek-v4-flash
+  - polza-ds/deepseek/deepseek-v4-flash-0731
+models:
+  polza-ds/deepseek/deepseek-v4.1-flash:
+    params:
+      extraBody:
+        provider:
+          only:
+          - inference-net
+          allow_fallbacks: true
+  polza-ds/deepseek/deepseek-v4-flash: {}
+  polza-ds/deepseek/deepseek-v4-flash-0731: {}
+  polza-ds/deepseek/deepseek-v4-pro-0813: {}
+tools:
+  alsoAllow:
+  - browser
+  - message
+subagents:
+  allowAgents:
+  - main
+  - service
+  model:
+    primary: polza-ds/deepseek/deepseek-v4-pro-0813
+    fallbacks:
+    - polza-ds/deepseek/deepseek-v4.1-flash
+thinkingDefault: max

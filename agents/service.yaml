@@ -1,0 +1,59 @@
+# Анкета агента «service» (oc-farm/v1, Agent).
+# Источник истины для agents.entries.service, route-строк bindings и настроек
+# канала. Сгенерировано oc-agent-factory.py export; критерий приёма:
+# plan → «0 изменений». Правки: руками здесь → validate → plan → apply.
+# См. agents/README.md.
+apiVersion: oc-farm/v1
+kind: Agent
+id: service
+origin: migrated
+channels:
+- type: telegram
+  account: service
+  settings:
+    enabled: true
+    name: KrajuService
+    tokenFile: /srv/openclaw/secrets/telegram-service.token
+    dmPolicy: allowlist
+    dmHistoryLimit: 0
+    historyLimit: 0
+    allowFrom:
+    - '10292232'
+- type: max
+  account: default
+  settings:
+    tokenFile: /srv/openclaw/secrets/max-default.token
+    dmPolicy: allowlist
+    groupPolicy: allowlist
+    allowFrom:
+    - '3498912'
+    webhookPublicUrl: https://oc.paylama.tech
+workspace: /srv/shared/Projects/Service
+agentDir: /srv/openclaw/.openclaw/agents/service/agent
+identity:
+  name: Docent2
+  emoji: 🧭
+  theme: 'Спокойный и внимательный: смотрю на детали, объясняю коротко, лишнего не говорю'
+model:
+  primary: polza-ds/deepseek/deepseek-v4.1-flash
+  fallbacks:
+  - polza-ds/deepseek/deepseek-v4-flash
+  - polza-ds/deepseek/deepseek-v4-flash-0731
+models:
+  polza-ds/deepseek/deepseek-v4.1-flash:
+    params:
+      extraBody:
+        provider:
+          only:
+          - inference-net
+          allow_fallbacks: true
+  polza-ds/deepseek/deepseek-v4-flash: {}
+  polza-ds/deepseek/deepseek-v4-flash-0731: {}
+tools:
+  alsoAllow:
+  - browser
+  - message
+subagents:
+  allowAgents:
+  - service
+thinkingDefault: max

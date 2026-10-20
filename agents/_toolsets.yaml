@@ -1,0 +1,21 @@
+# Библиотека наборов инструментов «Фабрика агентов» (OPF-8).
+# Поля из схемы OpenClaw 2026.8.2: tools.profile (minimal|coding|messaging|full),
+# tools.allow (только эти), tools.alsoAllow (добавить к профилю). Проверить имена
+# инструментов через `oc config schema` при применении (E2), не выдумывать.
+
+minimal-messaging:
+  description: "Переписка и немного веба — как у ksu сегодня"
+  tools:
+    profile: messaging
+    alsoAllow: [message, browser, web_search, web_fetch]
+
+ops-light:
+  description: "Операционный: браузер + сообщения (как у main/service сегодня)"
+  tools:
+    alsoAllow: [browser, message]
+
+coding:
+  description: "Разработка: профиль coding + веб (сверить состав с oc config schema)"
+  tools:
+    profile: coding
+    alsoAllow: [browser, web_search, web_fetch]

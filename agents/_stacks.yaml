@@ -1,0 +1,86 @@
+# Библиотека стеков моделей «Фабрика агентов» (OPF-8).
+# Источник фактов: openclaw.json (oc-node1), сверено 2026-10-14.
+# Использование: анкета ссылается полем `stack: <имя>`; при создании нового агента
+# factory берёт model/models/modelPolicy.allow из стека, далее владелец правит анкету.
+# ВНИМАНИЕ (решение 2026-10-14): local-only стек заморожен до завершения разведки
+# по локальным моделям — см. docs/План-фабрика-агентов.md §11.
+
+# --- Внешние стеки Polza (OpenAI-совместимый gateway, ключи в env auth-store) ---
+
+ds-economy:
+  description: "DeepSeek flash через polza-ds — дешёвый основной контур"
+  model:
+    primary: polza-ds/deepseek/deepseek-v4.1-flash
+    fallbacks:
+      - polza-ds/deepseek/deepseek-v4-flash
+      - polza-ds/deepseek/deepseek-v4-flash-0731
+  models:
+    polza-ds/deepseek/deepseek-v4.1-flash:
+      params:
+        extraBody:
+          provider:
+            only: [inference-net]
+            allow_fallbacks: true
+    polza-ds/deepseek/deepseek-v4-flash: {}
+    polza-ds/deepseek/deepseek-v4-flash-0731: {}
+  modelPolicy:
+    allow:
+      - polza-ds/deepseek/deepseek-v4.1-flash
+      - polza-ds/deepseek/deepseek-v4-flash
+      - polza-ds/deepseek/deepseek-v4-flash-0731
+
+ds-pro:
+  description: "DeepSeek pro через polza-ds — сложные задачи (субагенты main)"
+  model:
+    primary: polza-ds/deepseek/deepseek-v4-pro-0813
+    fallbacks:
+      - polza-ds/deepseek/deepseek-v4.1-flash
+  models:
+    polza-ds/deepseek/deepseek-v4-pro-0813: {}
+    polza-ds/deepseek/deepseek-v4.1-flash:
+      params:
+        extraBody:
+          provider:
+            only: [inference-net]
+            allow_fallbacks: true
+  modelPolicy:
+    allow:
+      - polza-ds/deepseek/deepseek-v4-pro-0813
+      - polza-ds/deepseek/deepseek-v4.1-flash
+
+ksu-ds:
+  description: "DeepSeek flash через polza-ksu-ds — отдельный счётчик/ключ для ksu"
+  model:
+    primary: polza-ksu-ds/deepseek/deepseek-v4.1-flash
+    fallbacks:
+      - polza-ksu-ds/deepseek/deepseek-v4-flash
+      - polza-ksu-ds/deepseek/deepseek-v4-flash-0731
+  models:
+    polza-ksu-ds/deepseek/deepseek-v4.1-flash:
+      params:
+        extraBody:
+          provider:
+            only: [inference-net]
+            allow_fallbacks: true
+    polza-ksu-ds/deepseek/deepseek-v4-flash: {}
+    polza-ksu-ds/deepseek/deepseek-v4-flash-0731: {}
+  modelPolicy:
+    allow:
+      - polza-ksu-ds/deepseek/deepseek-v4.1-flash
+      - polza-ksu-ds/deepseek/deepseek-v4-flash
+      - polza-ksu-ds/deepseek/deepseek-v4-flash-0731
+
+# --- Локальные стеки (Ollama 127.0.0.1:11434, плагин ollama) ---
+
+local-utility:
+  description: "Только векторный поиск памяти (bge-m3); LLM не используются"
+  model: null
+  modelPolicy:
+    allow: []
+
+local-only:
+  description: "Полностью локальный LLM-контур — ЗАМОРОЖЕН до разведки (§11)"
+  frozen: true
+  model: null
+  modelPolicy:
+    allow: []

@@ -1,0 +1,51 @@
+# Анкета агента «ksu» (oc-farm/v1, Agent).
+# Источник истины для agents.entries.ksu, route-строк bindings и настроек
+# канала. Сгенерировано oc-agent-factory.py export; критерий приёма:
+# plan → «0 изменений». Правки: руками здесь → validate → plan → apply.
+# См. agents/README.md.
+apiVersion: oc-farm/v1
+kind: Agent
+id: ksu
+origin: migrated
+channels:
+- type: telegram
+  account: ksu
+  settings:
+    enabled: true
+    name: KsuPomoshnik
+    tokenFile: /srv/openclaw/secrets/telegram-ksu.token
+    dmPolicy: allowlist
+    dmHistoryLimit: 0
+    historyLimit: 0
+    allowFrom:
+    - '1308310289'
+workspace: /srv/shared/Projects/Ksu
+agentDir: /srv/openclaw/.openclaw/agents/ksu/agent
+identity:
+  name: Помощник
+  emoji: 💬
+model:
+  primary: polza-ksu-ds/deepseek/deepseek-v4.1-flash
+  fallbacks:
+  - polza-ksu-ds/deepseek/deepseek-v4-flash
+  - polza-ksu-ds/deepseek/deepseek-v4-flash-0731
+models:
+  polza-ksu-ds/deepseek/deepseek-v4.1-flash:
+    params:
+      extraBody:
+        provider:
+          only:
+          - inference-net
+          allow_fallbacks: true
+  polza-ksu-ds/deepseek/deepseek-v4-flash: {}
+  polza-ksu-ds/deepseek/deepseek-v4-flash-0731: {}
+tools:
+  profile: messaging
+  alsoAllow:
+  - message
+  - browser
+  - web_search
+  - web_fetch
+subagents:
+  model: polza-ksu-ds/deepseek/deepseek-v4.1-flash
+thinkingDefault: max

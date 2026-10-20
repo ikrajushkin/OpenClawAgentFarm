@@ -1,0 +1,50 @@
+# Библиотека пресетов каналов «Фабрика агентов» (OPF-8) — матрица каналов (T4).
+# Ключ верхнего уровня — ТИП канала (telegram/max/...): по нему factory определяет scope.
+# scope определяет, куда попадают settings анкеты:
+#   account — channels.<type>.accounts.<account> (telegram: у каждого бота свой аккаунт)
+#   channel — channels.<type> целиком (max: настройки живут на уровне канала)
+# Статус каналов 2026-10-14: telegram ×3 и max ×1 живы; nextcloud-talk/imap/webhooks
+# есть в схеме как плагины, но НЕ подключены (не в plugins.allow) — включение
+# планом этапа E3, не включать вручную.
+
+telegram:
+  scope: account
+  presets:
+    telegram-bot:
+      description: "Telegram Bot API, tokenFile — отдельный на бота"
+      settingsTemplate:
+        enabled: true
+        dmPolicy: allowlist
+        dmHistoryLimit: 0
+        historyLimit: 0
+
+max:
+  scope: channel
+  presets:
+    max-bot:
+      description: "MAX (VK), один бот на контур, настройки на уровне канала"
+      settingsTemplate:
+        dmPolicy: allowlist
+        groupPolicy: allowlist
+
+nextcloud-talk:
+  scope: account
+  disabled: true
+  presets:
+    nextcloud-talk-bot:
+      description: "Nextcloud Talk — плагин существует, НЕ подключён (E3)"
+
+imap:
+  scope: account
+  disabled: true
+  presets:
+    mail-imap:
+      description: "Почтовый ящик (IMAP) — плагин существует, НЕ подключён (E3)"
+
+webhooks:
+  scope: account
+  disabled: true
+  presets:
+    webhook-in:
+      description: "Входящие webhooks (Bitrix24 и пр.) — плагин существует, НЕ подключён; "
+      description2: "сами вебхуки сейчас идут через service (OPF-7, mos.ru)"
