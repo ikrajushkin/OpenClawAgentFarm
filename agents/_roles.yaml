@@ -1,36 +1,30 @@
 # Библиотека ролей субагентов «Фабрика агентов» (OPF-8) — «специфические задачи».
 # Применяются к subagents.* анкеты при создании агента; далее правятся в анкете.
-# Ограничения по умолчанию (2026-10-14): maxSpawnDepth ≤ 2 (как в defaults),
-# runTimeoutSeconds 900 (как в defaults), запрет рекурсивного делегирования.
+# Per-entry subagents (схема OpenClaw 2026.8.2, проверено dry-run 2026-10-20):
+# только delegationMode, allowAgents, model, thinking, requireAgentId.
+# Лимиты maxSpawnDepth/maxConcurrent/runTimeoutSeconds — ТОЛЬКО глобально
+# (agents.defaults.subagents: depth≤2, timeout 900) — в роли не выносятся.
 
 researcher:
   description: "Поиск и анализ: веб, чтение, краткий доклад"
   subagents:
-    maxSpawnDepth: 1
-    runTimeoutSeconds: 900
     delegationMode: suggest
   toolset: minimal-messaging
 
 doc-writer:
   description: "Документация и переводы: длинные тексты, структура, саммари"
   subagents:
-    maxSpawnDepth: 1
-    runTimeoutSeconds: 900
     delegationMode: suggest
   toolset: minimal-messaging
 
 ops-runner:
   description: "Операционные действия (read-only шаги, отчёты); apply — только снаружи"
   subagents:
-    maxSpawnDepth: 1
-    runTimeoutSeconds: 900
     delegationMode: suggest
   toolset: ops-light
 
 coder:
   description: "Правки кода/конфигов в workspace; коммиты — только с подтверждением"
   subagents:
-    maxSpawnDepth: 1
-    runTimeoutSeconds: 900
     delegationMode: suggest
   toolset: coding

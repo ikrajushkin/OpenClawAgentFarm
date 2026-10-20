@@ -74,10 +74,15 @@ python3 scripts/oc-agent-factory.py plan     [--emit-patch DIR]   # exit 2 = е�
 сравнение «анкета → конфиг» по управляемым поддеревьям (agents.entries,
 bindings-строки агента, channels-аккаунты по scope).
 
-## Статус (E1, 2026-10-14)
+## Статус (E2, 2026-10-20)
 
 - [x] export/validate/plan реализованы и проверены на снимке конфига: plan = 0 изменений
       для main/service/ksu (снимок вне репо, секретов в конфиге нет — только
       `${POLZA_API_KEY}` из env и tokenFile-пути)
-- [ ] apply/new/destroy (E2) — на тестовом агенте fab-test, см. план §8
+- [x] apply/new/edit/destroy (E2) — приёмка 2026-10-20 на тестовом агенте `fab-test`
+      (канал не подключали): new → validate → plan → apply --dry-run → apply --yes →
+      destroy --confirm; после каждого destroy конфиг семантически идентичен снимку
+      «до фабрики» (сверка скриптом), main/service/ksu не тронуты; создание — <2 мин.
+      Грабли этапа (per-entry `subagents`, roster-guard `oc config patch`, обход
+      gateway при destroy) — план §8 «Итоги E2».
 - [ ] Включение modelPolicy.allow для main/service/ksu — отдельным шагом после миграции
