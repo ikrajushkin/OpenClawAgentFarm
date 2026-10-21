@@ -22,6 +22,10 @@ if ($LASTEXITCODE -ne 0) { throw "ssh to $Server failed" }
 
 pscp -batch (Join-Path $repo "scripts\oc-agent-factory.py") "${Server}:$stage/oc-agent-factory.py"
 if ($LASTEXITCODE -ne 0) { throw "pscp factory failed" }
+pscp -batch (Join-Path $repo "scripts\\oc-project-digest.py") "${Server}:$stage/oc-project-digest.py"
+if ($LASTEXITCODE -ne 0) { throw "pscp digest failed" }
+pscp -batch (Join-Path $repo "scripts\\oc-reports.py") "${Server}:$stage/oc-reports.py"
+if ($LASTEXITCODE -ne 0) { throw "pscp reports failed" }
 $agents = (Get-ChildItem -Path (Join-Path $repo "agents") -Filter *.yaml).FullName
 pscp -batch $agents "${Server}:$stage/agents/"
 if ($LASTEXITCODE -ne 0) { throw "pscp agents failed" }

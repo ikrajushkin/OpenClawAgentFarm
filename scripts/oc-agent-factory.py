@@ -621,15 +621,436 @@ def cmd_edit(args, agents_dir):
     return 0
 
 
+# ---------------------------------------------------------------- E5: мультипроектность
+#
+# Workspace-слой (T7, OPF-9): анкетные `projects` не рендерятся в openclaw.json,
+# а материализуются в workspace агента: projects.yaml (реестр), PROJECTS.md
+# (навигация), блок «Проекты» в AGENTS.md (bootstrap Project Context),
+# навык skills/проект/SKILL.md (команда /проект), деревья проектов
+# (<dir>/PROJECT.md + docs/data/memory/logs) и .active-project (состояние
+# переключения; создаёт factory, пишет навык). Семантика — ADR-006.
+
+PROJECT_SUBDIRS = ("docs", "data", "memory", "logs")
+BLOCK_START = "<!-- oc-factory:projects:start -->"
+BLOCK_END = "<!-- oc-factory:projects:end -->"
+PROJECT_SKILL_DIR = "проект"          # каталог навыка; name: проект → команда /проект
+BG_SKILL_DIR = "фон"                  # навык фоновой работы проектов (E6)
+ACTIVE_FILE = ".active-project"
+
+
+def _projects_of(doc):
+    return [p for p in (doc.get("projects") or []) if isinstance(p, dict)]
+
+
+def _yaml_str(val):
+    return json.dumps(str(val), ensure_ascii=False)
+
+
+def validate_projects(doc):
+    """Ошибки анкетных projects (E5). [] — ок."""
+    problems = []
+    raw = doc.get("projects")
+    if not raw:
+        return problems
+    if not isinstance(raw, list):
+        return ["projects: должен быть списком {id,title,dir}"]
+    seen_id, seen_dir = set(), set()
+    for i, p in enumerate(raw):
+        where = "projects[%d]" % i
+        if not isinstance(p, dict):
+            problems.append("%s: элемент должен быть словарём {id,title,dir}" % where)
+            continue
+        pid, title, pdir = p.get("id"), p.get("title"), p.get("dir")
+        if (not isinstance(pid, str) or not pid
+                or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in pid)
+                or pid.startswith("-") or pid.endswith("-")):
+            problems.append("%s: id «%s» — slug из [a-z0-9-], без дефисов по краям"
+                            % (where, pid))
+        elif pid in seen_id:
+            problems.append("%s: id «%s» повторяется" % (where, pid))
+        else:
+            seen_id.add(pid)
+        if not isinstance(title, str) or not title.strip():
+            problems.append("%s: нет title" % where)
+        if (not isinstance(pdir, str) or not pdir or pdir.startswith(".")
+                or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+                       for c in pdir)):
+            problems.append("%s: dir «%s» — один сегмент [A-Za-z0-9._-] "
+                            "без точки в начале (без «..» и путей)" % (where, pdir))
+        elif pdir in seen_dir:
+            problems.append("%s: dir «%s» повторяется" % (where, pdir))
+        else:
+            seen_dir.add(pdir)
+        budget = p.get("budgetUsdPerDay")
+        if budget is not None and (isinstance(budget, bool)
+                                   or not isinstance(budget, (int, float))
+                                   or budget <= 0):
+            problems.append("%s: budgetUsdPerDay должен быть числом > 0" % where)
+    return problems
+
+
+
+def render_projects_yaml(doc):
+    out = ["# Реестр проектов агента — ГЕНЕРИТ oc-agent-factory из анкеты",
+           "# (agents/%s.yaml, projects) — не редактировать." % doc.get("id"),
+           "# Активный проект хранится отдельно в файле %s." % ACTIVE_FILE,
+           "agent: %s" % doc.get("id"),
+           "workspace: %s" % (doc.get("workspace") or ""),
+           "projects:"]
+    for p in _projects_of(doc):
+        out.append("  - id: %s" % p.get("id"))
+        out.append("    title: %s" % _yaml_str(p.get("title")))
+        out.append("    dir: %s" % p.get("dir"))
+        if p.get("description"):
+            out.append("    description: %s" % _yaml_str(p.get("description")))
+        if p.get("budgetUsdPerDay") is not None:
+            out.append("    budgetUsdPerDay: %s" % p.get("budgetUsdPerDay"))
+    return "\n".join(out) + "\n"
+
+
+def render_projects_md(doc):
+    out = ["# Проекты агента %s" % doc.get("id"), "",
+           "<!-- ГЕНЕРИТ oc-agent-factory из анкеты (agents/%s.yaml, projects) — не редактировать. -->"
+           % doc.get("id"),
+           "",
+           "Переключение: `/проект <id>` · список: `/проект список` · "
+           "статус: `/проект статус`.",
+           "", "| id | Проект | Каталог | Бюджет $/день | Описание |",
+           "|---|---|---|---|---|"]
+    for p in _projects_of(doc):
+        out.append("| %s | %s | `%s/` | %s | %s |"
+                   % (p.get("id"), p.get("title"), p.get("dir"),
+                      p.get("budgetUsdPerDay")
+                      if p.get("budgetUsdPerDay") is not None else "—",
+                      (p.get("description") or "").replace("|", "\\|")))
+    out += ["", "Карточка проекта — `<dir>/PROJECT.md` (цель, статус, ссылки); "
+            "данные проекта — только в его каталоге "
+            "(`docs/`, `data/`, `memory/`, `logs/`)."]
+    return "\n".join(out) + "\n"
+
+def render_agents_block(doc, active_id):
+    """Блок «Проекты» для AGENTS.md (вместе с маркерами)."""
+    out = [BLOCK_START, "## Проекты", "",
+           "Реестр проектов этого агента (генерит oc-agent-factory из анкеты — "
+           "не править; исключение — строка «Активный проект»).",
+           "Активный проект: **%s** · команды: `/проект <id>`, `/проект список`, "
+           "`/проект статус`." % active_id,
+           "Работая над задачей, держи контекст активного проекта: карточка — "
+           "`<dir>/PROJECT.md`, данные — в каталоге проекта.",
+           "", "| id | Проект | Каталог | Описание |",
+           "|---|---|---|---|"]
+    for p in _projects_of(doc):
+        out.append("| %s | %s | `%s/` | %s |"
+                   % (p.get("id"), p.get("title"), p.get("dir"),
+                      (p.get("description") or "").replace("|", "\\|")))
+    out += ["",
+            "## Фоновая работа и дайджесты",
+            "",
+            "- Долгие задачи проекта ставь в фон (durable — переживают перезапуск сессии):\n"
+            "  имя задачи/automations обязано содержать тег `proj-<id>`; результаты и\n"
+            "  проблемы пиши в `<dir>/logs/*.md` строками `RESULT: …` / `PROBLEM: …` —\n"
+            "  их подхватывает дайджест. Как ставить — навык `фон` (`/фон`).",
+            "- Дайджест проектов (результаты/проблемы/фон/ресурсы) приходит по расписанию\n"
+            "  (automation `factory-digest-<агент>`); бюджеты проектов (`budgetUsdPerDay`)\n"
+            "  — soft-ориентир, стопов нет.",
+            "", BLOCK_END]
+    return "\n".join(out) + "\n"
+
+
+def render_project_md(doc, p):
+    """Шаблон карточки проекта (создаётся, если отсутствует)."""
+    return """# %s
+
+- id: `%s` · каталог: `%s/` · агент: `%s`
+
+## Цель
+<!-- заполнить -->
+
+## Текущий статус
+<!-- заполнить -->
+
+## Ссылки и материалы
+<!-- заполнить -->
+""" % (p.get("title"), p.get("id"), p.get("dir"), doc.get("id"))
+
+
+def render_project_skill(doc):
+    """SKILL.md навыка «проект» (slash-команда /проект — по имени навыка)."""
+    return """---
+name: "проект"
+description: "Переключение проектов агента: /проект <id>, /проект список, /проект статус (реестр — projects.yaml)."
+---
+
+# Переключение проектов
+
+Управление активным проектом агента. Реестр — `projects.yaml` в корне workspace;
+карточка проекта — `<dir>/PROJECT.md`; состояние переключения — `.active-project`.
+
+Всё после `/проект` — аргумент:
+
+| Аргумент | Действие |
+|---|---|
+| `<id>` | переключить активный проект на `<id>` |
+| `список` | показать реестр проектов |
+| `статус` | показать активный проект и его карточку |
+
+## Переключение проекта (выполнять строго по шагам)
+
+1. Прочитай `projects.yaml`; найди проект по `id`. Нет такого id — покажи реестр
+   и предложи выбрать из него, ничего не меняй.
+2. Запиши id одной строкой в `.active-project` (корень workspace) — это
+   источник истины «какой проект активен».
+3. В `AGENTS.md` в блоке между `<!-- oc-factory:projects:start -->` и
+   `<!-- oc-factory:projects:end -->` замени значение в строке
+   `Активный проект: **<id>**` на новый id (меняется только id в `**…**`).
+4. Прочитай `<dir>/PROJECT.md` активного проекта (гидратация контекста).
+   Файла нет — создай карточку: заголовок, цель, текущий статус, ссылки.
+5. Ответь коротко: какой проект стал активен и 2–3 строки о нём по карточке.
+
+## `/проект список`
+Таблица из `projects.yaml`: id, название, каталог, описание. Отметь активный id.
+
+## `/проект статус`
+Прочитай `.active-project`; покажи id, название, каталог, бюджет (если задан)
+и краткое содержимое `PROJECT.md` (цель/статус).
+
+## Правила
+
+- `projects.yaml`, `PROJECTS.md` и блок «Проекты» в `AGENTS.md` генерирует
+  oc-agent-factory из анкеты — руками не править. Исключения: строка
+  `Активный проект: **…**` и файл `.active-project` (их ведёт эта команда).
+- Данные проекта — только внутри его каталога (`<dir>/`); кросс-проектный
+  обмен — явный (через `/srv/shared/Inbox` или по запросу пользователя).
+- Бюджет проекта (`budgetUsdPerDay`) — soft-ориентир (стопов нет); ресурсы и
+  дайджесты — навык `фон` (`/фон`) и cron-дайджест `factory-digest-<агент>`.
+"""
+
+
+def render_bg_skill(doc):
+    """SKILL.md навыка «фон» (slash-команда /фон): фоновая работа проектов (E6)."""
+    return """---
+name: "фон"
+description: "Фоновые задачи проектов: durable-задачи с тегом proj-<id>, журналы RESULT:/PROBLEM:, дайджесты и бюджеты."
+---
+
+# Фоновая работа проектов
+
+Долгие задачи проекта выполняются в фоне — durable-задачи переживают перезапуск
+сессии и рестарт gateway. Реестр проектов — `projects.yaml`; активный проект —
+`.active-project`; данные — только в каталоге проекта `<dir>/`.
+
+Всё после `/фон` — аргумент:
+
+| Аргумент | Действие |
+|---|---|
+| `задача <текст>` | поставить фоновую задачу активного проекта |
+| `список` | показать фоновые задачи проектов |
+| `дайджест` | собрать дайджест сейчас (локально, без доставки) |
+
+## Постановка фоновой задачи (`/фон задача …`)
+
+1. Определи активный проект (`/проект статус`); нет активного — предложи выбрать.
+2. Поставь задачу через automation (durable) — **имя обязано содержать тег
+   `proj-<id>`** (по нему задача попадает в дайджест):
+
+   ```bash
+   openclaw automations add --at <когда> --name "proj-<id>-<короткий-слаг>" \\
+     --session isolated --agent <агент> \\
+     --message "<что сделать; писать журнал в <dir>/logs/; итог — RESULT:/PROBLEM:>" \\
+     --announce --best-effort-deliver
+   ```
+
+   Вместо `--at` можно `--every <интервал>` (периодическая работа).
+3. Запиши постановку задачи в журнал проекта: `<dir>/logs/<дата>.md`, строкой
+   `RESULT: поставлена фоновая задача proj-<id>-<слаг> (когда)`.
+4. Ответь коротко: id задачи, что и когда сделает.
+
+## Журнал проекта (`<dir>/logs/*.md`)
+
+Дайджест читает журналы по маркерам — каждая значимая запись строкой:
+
+- `RESULT: …` — результат работы (попадает в раздел «Результаты»);
+- `PROBLEM: …` — проблема/препятствие (раздел «Проблемы»).
+
+## Фоновые задачи (`/фон список`)
+
+`openclaw tasks list --json` → задачи агента с тегом `proj-<id>` (в name/label)
+за последние 2 дня: id, статус, имя. Провальные (`failed`/`timed_out`/`lost`) —
+выдели отдельно и предложи повторить.
+
+## Дайджест и бюджеты
+
+- Cron-automation `factory-digest-<агент>` по расписанию присылает в чат
+  дайджест: результаты, проблемы, фоновые задачи, ресурсы (usage-cost) и
+  бюджеты. Скрипт — `oc-project-digest.py`; конфиг дайджеста — поле `reports`
+  в анкете (синхронизация — `oc-reports.py`).
+- Бюджет проекта `budgetUsdPerDay` — soft-ориентир: дайджест предупредит о
+  перерасходе, но остановок нет. Ресурсы считаются по агенту в целом
+  (`openclaw gateway usage-cost`); разбивка по проектам — по тегам `proj-<id>`
+  задач и журналам.
+"""
+
+
+def _read_file(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _patch_block(text, block):
+    """Заменить/добавить маркированный блок в тексте AGENTS.md."""
+    block = block.rstrip("\n")
+    if BLOCK_START in text and BLOCK_END in text:
+        i = text.index(BLOCK_START)
+        j = text.index(BLOCK_END) + len(BLOCK_END)
+        return text[:i] + block + text[j:]
+    if text.strip():
+        return text.rstrip("\n") + "\n\n" + block + "\n"
+    return block + "\n"
+
+
+def workspace_actions(doc):
+    """Действия workspace-слоя (E5) для агента; [] — projects не заданы.
+
+    Каждое действие: {kind, path, label, content?, dirs?, status}.
+    status: create | update | ok | skip (skip — write-if-missing при наличии).
+    """
+    projs = _projects_of(doc)
+    if not projs:
+        return []
+    ws = doc.get("workspace") or ""
+    if not ws:
+        return [{"kind": "warn", "path": "", "status": "ok",
+                 "label": "projects заданы, а workspace не указан — нечего делать"}]
+    ids = [p.get("id") for p in projs]
+    acts = []
+
+    active_path = os.path.join(ws, ACTIVE_FILE)
+    state = _read_file(active_path)
+    active = (state or "").strip() or None
+    if active and active not in ids:
+        acts.append({"kind": "warn", "path": active_path, "status": "ok",
+                     "label": "%s: «%s» не в реестре проектов — переключи /проект"
+                              % (ACTIVE_FILE, active)})
+    if not active:
+        active = ids[0]
+
+    for p in projs:
+        pdir = os.path.join(ws, p["dir"])
+        dirs = [] if os.path.isdir(pdir) else [pdir]
+        dirs += [os.path.join(pdir, s) for s in PROJECT_SUBDIRS
+                 if not os.path.isdir(os.path.join(pdir, s))]
+        if dirs:
+            acts.append({"kind": "mkdir", "path": pdir, "dirs": dirs,
+                         "label": "%s/{%s}/" % (p["dir"], ",".join(PROJECT_SUBDIRS)),
+                         "status": "create"})
+        pcard = os.path.join(pdir, "PROJECT.md")
+        cur = _read_file(pcard)
+        acts.append({"kind": "write-if-missing", "path": pcard,
+                     "label": "%s/PROJECT.md" % p["dir"],
+                     "content": render_project_md(doc, p),
+                     "status": "create" if cur is None else "skip"})
+
+    for rel, content in (("projects.yaml", render_projects_yaml(doc)),
+                         ("PROJECTS.md", render_projects_md(doc))):
+        path = os.path.join(ws, rel)
+        cur = _read_file(path)
+        acts.append({"kind": "write", "path": path, "label": rel, "content": content,
+                     "status": "create" if cur is None
+                     else ("ok" if cur == content else "update")})
+
+    apath = os.path.join(ws, "AGENTS.md")
+    cur = _read_file(apath) or ""
+    new = _patch_block(cur, render_agents_block(doc, active))
+    acts.append({"kind": "patch-block", "path": apath,
+                 "label": "AGENTS.md (блок «Проекты»)", "content": new,
+                 "status": "create" if not cur.strip()
+                 else ("ok" if new == cur else "update")})
+
+    for sk_dir, sk_render in ((PROJECT_SKILL_DIR, render_project_skill),
+                              (BG_SKILL_DIR, render_bg_skill)):
+        spath = os.path.join(ws, "skills", sk_dir, "SKILL.md")
+        content = sk_render(doc)
+        cur = _read_file(spath)
+        acts.append({"kind": "write", "path": spath,
+                     "label": "skills/%s/SKILL.md" % sk_dir,
+                     "content": content,
+                     "status": "create" if cur is None
+                     else ("ok" if cur == content else "update")})
+
+    acts.append({"kind": "write-if-missing", "path": active_path, "label": ACTIVE_FILE,
+                 "content": ids[0] + "\n",
+                 "status": "create" if state is None else "skip"})
+    return acts
+
+
+def plan_workspace(docs):
+    """Печатает план workspace-слоя; возвращает ({agent_id: acts}, pending)."""
+    all_acts, pending_total = {}, 0
+    for _, doc in docs:
+        acts = workspace_actions(doc)
+        if not acts:
+            continue
+        aid = doc.get("id")
+        all_acts[aid] = acts
+        pend = [a for a in acts if a.get("status") in ("create", "update")]
+        print("workspace[%s]:" % aid)
+        for a in acts:
+            if a.get("kind") == "warn":
+                print("  ! " + a["label"])
+        for a in pend:
+            print("  %s %-6s %s" % ("+" if a["status"] == "create" else "~",
+                                    a["status"], a["label"]))
+        if not pend:
+            print("  без изменений")
+        pending_total += len(pend)
+    return all_acts, pending_total
+
+
+def apply_workspace(acts_by_agent):
+    """Применить workspace-слой (только create/update). Возвращает число записей."""
+    written = 0
+    for aid in sorted(acts_by_agent):
+        for a in acts_by_agent[aid]:
+            if a.get("status") not in ("create", "update"):
+                continue
+            path = a.get("path") or ""
+            if a["kind"] == "mkdir":
+                for d in a.get("dirs") or []:
+                    os.makedirs(d, exist_ok=True)
+            elif a["kind"] in ("write", "write-if-missing"):
+                if a["kind"] == "write-if-missing" and os.path.exists(path):
+                    continue
+                if path:
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                    fh.write(a["content"])
+            elif a["kind"] == "patch-block":
+                if path:
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                if os.path.exists(path):
+                    stamp = time.strftime("%Y%m%d-%H%M%S")
+                    shutil.copy2(path, path + ".bak-" + stamp)
+                    print("  бэкап %s -> %s.bak-%s" % (os.path.basename(path),
+                                                       path, stamp))
+                with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                    fh.write(a["content"])
+            written += 1
+            print("  записано %s: %s" % (aid, a["label"]))
+    return written
+
+
 # ---------------------------------------------------------------- E2: apply/destroy
 
 def cmd_apply(config_path, agents_dir, libs, ids, dry_run=False, yes=False,
               simulate=None, backup_dir=None, oc_cmd=DEFAULT_OC_CMD):
-    """validate → plan → бэкап → oc config patch --dry-run → запись → контроль (plan=0).
+    """validate → plan → бэкап → oc config patch → контроль (plan=0) + workspace (E5).
 
     Без --yes после успешного dry-run ничего не пишется (exit 2).
     --simulate PATH: прогнать merge-семантику локально, записать смерженный конфиг
-    в PATH и не трогать реальный конфиг/сервер.
+    в PATH и не трогать реальный конфиг/сервер (workspace не применяется).
     """
     with open(config_path, encoding="utf-8") as fh:
         cfg = json.load(fh)
@@ -646,12 +1067,16 @@ def cmd_apply(config_path, agents_dir, libs, ids, dry_run=False, yes=False,
                 sys.exit("apply: анкета «%s» не найдена в %s" % (aid, agents_dir))
 
     patch, replace, changed, total = build_patch(cfg, docs, libs)
-    if not patch:
+    ws_all, ws_pending = plan_workspace(docs)
+    if not patch and not ws_pending:
         print("apply: нечего применять (0 изменений)")
         return 0
 
-    print("apply: изменения по агентам: %s (всего %d)" %
-          (", ".join(sorted(changed)), total))
+    if patch:
+        print("apply: изменения по агентам: %s (всего %d)" %
+              (", ".join(sorted(changed)), total))
+    if ws_pending:
+        print("apply: workspace-слой (projects): %d действий" % ws_pending)
     for aid in sorted(changed):
         entry_diffs, missing, extra, chan_diffs = changed[aid]
         for path, live, wanted_val in entry_diffs + chan_diffs:
@@ -669,22 +1094,25 @@ def cmd_apply(config_path, agents_dir, libs, ids, dry_run=False, yes=False,
         with open(simulate, "w", encoding="utf-8", newline="\n") as fh:
             json.dump(merged, fh, ensure_ascii=False, indent=2)
             fh.write("\n")
-        print("apply --simulate: смерженный конфиг -> %s (реальный конфиг не тронут)" % simulate)
+        print("apply --simulate: смерженный конфиг -> %s (реальный конфиг и "
+              "workspace не тронуты)" % simulate)
         return 0
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    backup_dir = backup_dir or "/srv/openclaw/backups/factory"
-    os.makedirs(backup_dir, exist_ok=True)
-    backup = backup_file(config_path, backup_dir, "pre-apply")
-    patch_path = os.path.join(backup_dir, "patch-%s.json5" % stamp)
-    with open(patch_path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(json.dumps(patch, ensure_ascii=False, indent=1))
-    print("бэкап конфига -> %s" % backup)
-    print("патч -> %s" % patch_path)
+    patch_path = None
+    if patch:
+        backup_dir = backup_dir or "/srv/openclaw/backups/factory"
+        os.makedirs(backup_dir, exist_ok=True)
+        backup = backup_file(config_path, backup_dir, "pre-apply")
+        patch_path = os.path.join(backup_dir, "patch-%s.json5" % stamp)
+        with open(patch_path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(patch, ensure_ascii=False, indent=1))
+        print("бэкап конфига -> %s" % backup)
+        print("патч -> %s" % patch_path)
 
-    if run_oc(oc_cmd, patch_path, replace, dry_run=True) != 0:
-        print("apply: oc config patch --dry-run провалился — конфиг не изменён")
-        return 1
+        if run_oc(oc_cmd, patch_path, replace, dry_run=True) != 0:
+            print("apply: oc config patch --dry-run провалился — конфиг не изменён")
+            return 1
     if dry_run:
         print("apply --dry-run: проверка прошла, запись не выполнялась")
         return 0
@@ -692,20 +1120,29 @@ def cmd_apply(config_path, agents_dir, libs, ids, dry_run=False, yes=False,
         print("apply: dry-run ok; для записи добавьте --yes")
         return 2
 
-    if run_oc(oc_cmd, patch_path, replace, dry_run=False) != 0:
-        print("apply: ЗАПИСЬ ПРОВАЛЕНА; откат: cp %s %s" % (backup, config_path))
-        return 1
+    if patch:
+        if run_oc(oc_cmd, patch_path, replace, dry_run=False) != 0:
+            print("apply: ЗАПИСЬ ПРОВАЛЕНА; откат: cp %s %s" % (backup, config_path))
+            return 1
 
-    for aid in new_ids:  # каркас каталогов только для создаваемых агентов
-        _, doc = find_doc(docs, aid)
-        scaffold_agent(aid, render_agent(doc))
+        for aid in new_ids:  # каркас каталогов только для создаваемых агентов
+            _, doc = find_doc(docs, aid)
+            scaffold_agent(aid, render_agent(doc))
 
-    with open(config_path, encoding="utf-8") as fh:
-        fresh = json.load(fh)
-    _, _, left, left_total = build_patch(fresh, docs, libs)
-    if left:
-        print("apply: КОНТРОЛЬ провалился — осталось %d изменений, см. plan" % left_total)
-        return 1
+        with open(config_path, encoding="utf-8") as fh:
+            fresh = json.load(fh)
+        _, _, left, left_total = build_patch(fresh, docs, libs)
+        if left:
+            print("apply: КОНТРОЛЬ провалился — осталось %d изменений, см. plan" % left_total)
+            return 1
+
+    if ws_pending:
+        apply_workspace(ws_all)
+        _, left_ws = plan_workspace(docs)
+        if left_ws:
+            print("apply: КОНТРОЛЬ workspace провалился — осталось %d действий"
+                  % left_ws)
+            return 1
     print("apply: ok — контрольный plan даёт 0 изменений")
     return 0
 
@@ -1074,6 +1511,9 @@ def cmd_validate(agents_dir, libs, check_secrets=False, cfg=None):
                              "(допустимы: %s)" % (where, key,
                                                   ", ".join(sorted(SUBAGENTS_ENTRY_KEYS))))
 
+        # E5: анкетные projects — slug-id, dir без «..», бюджет > 0.
+        problems.extend(validate_projects(doc))
+
         # Секреты — только ссылки (tokenFile/secretRef).
         check_secret_refs(doc.get("channels") or [], where, problems, warns,
                           check_secrets)
@@ -1195,6 +1635,10 @@ def cmd_plan(cfg, agents_dir, libs, emit_patch=None):
         if entry_id not in known:
             print("! %s: есть в конфиге, но анкеты нет — не управляется" % entry_id)
 
+    # E5: workspace-слой (projects → projects.yaml/PROJECTS.md/AGENTS.md/навык).
+    _, ws_pending = plan_workspace(docs)
+    changes += ws_pending
+
     if emit_patch:
         os.makedirs(emit_patch, exist_ok=True)
         patch, replace, _, _ = build_patch(cfg, docs, libs)
@@ -1206,6 +1650,8 @@ def cmd_plan(cfg, agents_dir, libs, emit_patch=None):
             fh.write("\n".join(replace) + ("\n" if replace else ""))
         print("patch -> %s (replace-paths -> %s)" % (ppath, rpath))
 
+    if ws_pending:
+        print("plan: из них workspace-слой (projects): %d действий" % ws_pending)
     print("plan: %d изменений" % changes)
     return 2 if changes or problems else 0
 

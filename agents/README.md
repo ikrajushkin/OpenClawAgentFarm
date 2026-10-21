@@ -45,8 +45,17 @@ subagents: {...}
 thinkingDefault: max
 modelPolicy: {allow: [...]}   # жёсткий allowlist; для новых агентов обязателен
 notes: "свободные заметки — в конфиг не попадают"
-projects: []             # OPF-9 (этап E5) — в конфиг не рендерится
-reports: {}              # OPF-9 (этап E6) — в конфиг не рендерится
+projects:                # OPF-9 (E5): реестр проектов → workspace-слой (см. ниже)
+  - { id: dom, title: "Домашние дела", dir: Dom, description: "...", budgetUsdPerDay: 5 }
+reports:                  # OPF-9 (E6): настройка дайджеста проектов (в конфиг не рендерится)
+  digest:                 # automation factory-digest-<id> -> канал владельца
+    schedule: "0 9 * * *"   # cron (5/6 полей)
+    tz: Europe/Moscow       # IANA (необязательно)
+    channel: telegram       # канал доставки
+    account: service        # аккаунт канала (multi-account)
+    to: '10292232'          # chatId/номер владельца
+    days: 1                 # период дайджеста (дни)
+    enabled: true           # false — автоматизация выключена
 ```
 
 Правила:
@@ -85,6 +94,56 @@ python3 scripts/oc-agent-factory.py destroy --id <id> --confirm [--simulate PATH
 exit 2 = дрейф). `validate` — ошибки (exit 1) и предупреждения (exit 0). `plan` —
 сравнение «анкета → конфиг» по управляемым поддеревьям (agents.entries,
 bindings-строки агента, channels-аккаунты по scope).
+
+## Мультипроектность (E5, OPF-9): `projects` и `/проект`
+
+Анкетный `projects` — реестр проектов агента (в `openclaw.json` не рендерится):
+`{id, title, dir, description?, budgetUsdPerDay?}`; `id` — slug `[a-z0-9-]`,
+`dir` — один сегмент `[A-Za-z0-9._-]` **относительно workspace агента**
+(validate ловит `..`, абсолютные пути и подкаталоги). `plan`/`apply` материализуют
+workspace-слой (идемпотентно, `openclaw.json` не трогается):
+
+- `projects.yaml` — машиночитаемый реестр (managed, из анкеты);
+- `PROJECTS.md` — навигация (managed);
+- блок «Проекты» в `AGENTS.md` между `<!-- oc-factory:projects:start/end -->`
+  (bootstrap Project Context — виден агенту в каждом ходе; бэкап перед правкой);
+- `skills/проект/SKILL.md` — навык; имя навыка = slash-команда чата
+  `/проект <id>`, `/проект список`, `/проект статус`;
+- `<dir>/{PROJECT.md, docs/, data/, memory/, logs/}` — дерево проекта
+  (`PROJECT.md` только создаётся, существующее не перезаписывается);
+- `.active-project` — активный проект (создаёт factory = первый проект анкеты;
+  дальше пишет только навык `/проект`).
+
+Семантика — [ADR-006](../docs/ADR/ADR-006-Мультипроектность.md): активный проект
+один на агента (per-агент), гидратация — `PROJECT.md` активного проекта, состояние
+в `.active-project` переживает сессии (зеркало — строка «Активный проект» в блоке).
+После правки `SKILL.md` — `systemctl restart openclaw-gateway` (инвентарь навыков
+кэшируется; вотчер снапшот не обновляет — грабли §1.6). Пилот — `service`
+(e2e проверен 2026-10-21); `main`/`ksu` не трогать.
+
+## Дайджесты и фоновая работа (E6, OPF-9/T8)
+
+- **`reports.digest`** в анкете — конфигурация cron-дайджеста проектов (в конфиг не
+  рендерится); синхронизация automation — `scripts/oc-reports.py`:
+
+  ```bash
+  sudo -u openclaw env HOME=/srv/openclaw python3 /usr/local/lib/oc-factory/oc-reports.py \
+      --agents-dir /usr/local/lib/oc-factory/agents --diff      # что изменится
+  # применить: --apply ; удалить лишние factory-digest-*: --apply --prune
+  ```
+
+  Automation `factory-digest-<id>` — **command job** (stdout скрипта → `--announce` в канал
+  владельца, без агентского хода, 0 токенов); declaration-key `factory:<id>:digest`.
+- **Сборщик** — `scripts/oc-project-digest.py` (лежит на сервере рядом с factory):
+  разделы «результаты / проблемы / фоновые задачи / ресурсы / бюджеты»; журналы проектов
+  `<dir>/logs/*.md` читаются по маркерам `RESULT:`/`PROBLEM:`; задачи — по тегу `proj-<id>`;
+  ресурсы — `openclaw gateway usage-cost`; бюджеты `budgetUsdPerDay` (soft) сверяются
+  с расходом дня. Ручной прогон:
+  `python3 oc-project-digest.py --workspace <ws> --days 1 [--save]`.
+- **Навык `фон`** (`/фон задача|список|дайджест`) — фоновые задачи проектов: durable
+  `openclaw automations` с тегом `proj-<id>` в имени задачи + журналы `RESULT:`/`PROBLEM:`;
+  правила продублированы блоком «Фоновая работа и дайджесты» в `AGENTS.md`.
+  Пилот — `service` (дайджест доставляется владельцу в telegram).
 
 ## Деплой и drift-контроль (E4, 2026-10-21)
 
@@ -134,4 +193,14 @@ powershell -ExecutionPolicy Bypass -File scripts/oc-factory-deploy.ps1
       `/root/oc-factory-e2/` удалён. T5/T6 закрыты: правки агентов — только анкета →
       `plan` → `apply`, ручные правки конфига запрещены.
 - [ ] Включение modelPolicy.allow для main/service/ksu — отдельным согласованным шагом
-- [ ] E5–E7: мультипроектность OPF-9 на `service` (пилоты только на `service`)
+- [x] E5 (2026-10-21): мультипроектность OPF-9 — ADR-006, `projects` в анкете +
+      workspace-слой `plan`/`apply` (projects.yaml, PROJECTS.md, блок AGENTS.md,
+      навык `/проект`, деревья проектов, `.active-project`), пилот на `service`
+      (digitalization-uk / wifi-public-business / brand-stopzatop) — e2e
+      `/проект список|<id>` проверен; `openclaw.json` не менялся (md5 тот же).
+- [x] E6 (2026-10-21): фоновая работа + дайджесты + бюджеты (T8) — `oc-project-digest.py`
+      + automation command job `factory-digest-<id>` (delivery владельцу, 0 токенов),
+      синхронизация из `reports.digest` (`oc-reports.py`), навык `/фон` (durable-задачи
+      `proj-<id>` + журналы `RESULT:`/`PROBLEM:`), бюджеты `budgetUsdPerDay` (soft);
+      пилот `service` — дайджест доставлен владельцу, `plan`=0, `export --check`=0.
+- [ ] E7: док-апдейты, сверка managed-файлов workspace в drift-контроле (OPF-9)

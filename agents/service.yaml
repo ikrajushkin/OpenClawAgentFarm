@@ -57,3 +57,17 @@ subagents:
   allowAgents:
   - service
 thinkingDefault: max
+projects:                # OPF-9 (E5): реестр проектов -> workspace-слой factory (ADR-006)
+  # budgetUsdPerDay — soft-ориентиры E6 (пилотные значения, требуют согласования)
+  - { id: digitalization-uk,     title: "Цифровой УК",           dir: digitalization-uk,     budgetUsdPerDay: 20 }
+  - { id: wifi-public-business,  title: "Wi-Fi public business", dir: wifi-public-business,  budgetUsdPerDay: 15 }
+  - { id: brand-stopzatop,       title: "СтопЗатоп (бренд)",     dir: brand-stopzatop,       budgetUsdPerDay: 10 }
+reports:                 # OPF-9 (E6/T8): дайджест проектов -> automation factory-digest-service
+  digest:
+    schedule: "0 9 * * *"        # ежедневно в 09:00
+    tz: Europe/Moscow
+    channel: telegram
+    account: service
+    to: '10292232'               # владелец (allowFrom telegram)
+    days: 1
+    enabled: true
