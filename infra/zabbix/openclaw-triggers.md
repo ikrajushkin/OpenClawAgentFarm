@@ -26,6 +26,7 @@
 | `custom.openclaw.backup.age_hours` | Numeric (unsigned) | 1h | часов с последнего успешного бэкапа |
 | `custom.openclaw.backup.sizeMb` | Numeric (unsigned) | 1h | размер последнего бэкапа, MB |
 | `custom.openclaw.restore.status` | Text | 1h | статус последней restore-дрели (`ok`/`error`) |
+| `custom.openclaw.factory.drift` | Text | 1h | сверка конфига и анкет фабрики (`ok`/`drift`/`error`) |
 
 ## Триггеры (Triggers)
 
@@ -40,6 +41,7 @@
 | Бэкап устарел | `last(/oc-node1/custom.openclaw.backup.age_hours)>30` | High |
 | Бэкап завершился с ошибкой | `last(/oc-node1/custom.openclaw.backup.status)<>"ok"` | High |
 | Restore-дрель не прошла | `last(/oc-node1/custom.openclaw.restore.status)<>"ok"` | Warning |
+| Дрейф конфига фабрики | `last(/oc-node1/custom.openclaw.factory.drift)<>"ok"` | Warning |
 
 ## Примечания
 

@@ -20,6 +20,15 @@
   `custom.openclaw.cron.{jobs,errors}`, `custom.openclaw.heartbeat.{main,ksu,service}`;
 - `zabbix/openclaw-triggers.md` — спецификация элементов данных и триггеров для Zabbix-сервера (OPF-6).
 
+Фабрика агентов (добавлено 2026-10-21, OPF-8/E4):
+- `factory/oc-factory-drift.sh` — drift-контроль «конфиг ≠ анкеты» (на сервере:
+  `/usr/local/bin/oc-factory-drift.sh`, cron `/etc/cron.d/oc-factory` 4×/сутки,
+  метрика `/var/lib/openclaw-metrics/factory-drift.json`);
+- `factory/oc-factory-install.sh` — установка factory + drift-контроля на oc-node1
+  (вызывается из `scripts/oc-factory-deploy.ps1`; factory живёт в `/usr/local/lib/oc-factory/`);
+- `cron/oc-factory` — `/etc/cron.d/oc-factory`, drift-проверка 4×/сутки;
+- `zabbix/openclaw-factory.conf` — UserParameter `custom.openclaw.factory.drift`;
+
 Бэкапы и restore (добавлено 2026-10-14, OPF-4):
 - `backup/oc-backup.sh` — ежедневный бэкап (pg-дампы nc-db/basip, `/srv/shared`, `.openclaw`,
   `nextcloud/html`, basip-secrets, git-bundle basip, SHA256SUMS; ротация 5 прогонов)

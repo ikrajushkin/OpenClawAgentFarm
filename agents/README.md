@@ -1,7 +1,8 @@
 # agents/ — анкеты агентов «Фабрика агентов» (OPF-8)
 
 Источник истины для агентов oc-node1. `openclaw.json` — производный артефакт:
-правки конфига делаются ТОЛЬКО через анкету + `oc-agent-factory.py plan` → apply (E2).
+правки конфига делаются ТОЛЬКО через анкету + `oc-agent-factory.py plan` → apply (E2);
+ручные правки конфига запрещены (E4 — drift-контроль `export --check` их ловит).
 Каталог и инструмент — план [План-фабрика-агентов.md](../docs/План-фабрика-агентов.md).
 
 ## Файлы
@@ -62,11 +63,13 @@ reports: {}              # OPF-9 (этап E6) — в конфиг не ренд
    включение allowlist делается отдельным согласованным шагом после миграции,
    чтобы не менять поведение текущих пользователей.
 4. Правки руками → `validate` → `plan` (посмотреть diff) → `apply` (E2, с бэкапом).
+   Ручные правки `openclaw.json` запрещены (E4): drift-контроль фиксирует расхождение
+   «конфиг ≠ анкеты» и правки мимо фабрики.
 
 ## Команды
 
 ```bash
-python3 scripts/oc-agent-factory.py export   --config /srv/openclaw/.openclaw/openclaw.json
+python3 scripts/oc-agent-factory.py export   --config /srv/openclaw/.openclaw/openclaw.json [--check]
 python3 scripts/oc-agent-factory.py validate [--check-secrets]
 python3 scripts/oc-agent-factory.py plan     [--emit-patch DIR]   # exit 2 = есть diff
 # E2+: запись и жизненный цикл (детали — --help)
@@ -77,12 +80,38 @@ python3 scripts/oc-agent-factory.py apply   [--dry-run] [--yes] --id <id>...
 python3 scripts/oc-agent-factory.py destroy --id <id> --confirm [--simulate PATH]
 ```
 
-`export` перегенерирует анкеты из конфига (аннотации stack/role/toolset/notes
-сохраняет). `validate` — ошибки (exit 1) и предупреждения (exit 0). `plan` —
+`export` перегенерирует анкеты из конфига (аннотации stack/role/toolset/notes/preset
+сохраняет); `export --check` — сверка без записи (drift-контроль E4: exit 0 = нет дрейфа,
+exit 2 = дрейф). `validate` — ошибки (exit 1) и предупреждения (exit 0). `plan` —
 сравнение «анкета → конфиг» по управляемым поддеревьям (agents.entries,
 bindings-строки агента, channels-аккаунты по scope).
 
-## Статус (E3, 2026-10-20)
+## Деплой и drift-контроль (E4, 2026-10-21)
+
+Factory на oc-node1 живёт постоянно: `/usr/local/lib/oc-factory/` (код + анкеты, зеркало git),
+обёртка `/usr/local/bin/oc-factory`. Заливка с рабочей станции — один шаг:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/oc-factory-deploy.ps1
+```
+
+Скрипт нормализует `.sh` в LF (грабля CRLF), устанавливает factory + drift-контроль
+(`infra/factory/oc-factory-install.sh`) и прогоняет `validate` + `export --check`
+(дрейф должен быть 0). Состав установки —
+[docs/Восстановление-и-развёртывание.md](../docs/Восстановление-и-развёртывание.md).
+
+**Drift-контроль**: cron `/etc/cron.d/oc-factory` (4×/сутки) запускает
+`/usr/local/bin/oc-factory-drift.sh` → `export --check` → `/var/log/oc-factory-drift.log`
++ метрика `custom.openclaw.factory.drift` (`ok`/`drift`/`error`) для Zabbix. Что ловит:
+
+- ручную правку `openclaw.json` мимо фабрики (hot-fix → дрейф «конфиг ≠ анкеты»);
+- анкету без записи в `agents.entries` (создан/удалён мимо фабрики или не применена).
+
+Расхождение = сигнал разобраться: правка мимо фабрики → перенести в анкету (сверить `export`)
+или откатить; неприменённая анкета → `plan` → `apply`. Ошибка проверки (`error`) —
+смотреть `/var/log/oc-factory-drift.log`.
+
+## Статус (E4, 2026-10-21)
 
 - [x] export/validate/plan реализованы и проверены на снимке конфига: plan = 0 изменений
       для main/service/ksu (снимок вне репо, секретов в конфиге нет — только
@@ -98,4 +127,11 @@ bindings-строки агента, channels-аккаунты по scope).
       (kind: plugin — подключение вручную, ноты в `_channels.yaml`); шаблоны проверены
       `oc config patch --dry-run`; `validate` ловит неизвестные типы каналов и сверяет pluginId
       с `plugins.allow`. T2/T3/T4 закрыты на уровне пресетов.
-- [ ] Включение modelPolicy.allow для main/service/ksu — отдельным шагом после миграции
+- [x] E4 (2026-10-21): миграция main/service/ksu на анкеты закрыта (diff=0: `export --check`
+      = 0 дрейфов, `plan` = 0 на живом конфиге); drift-контроль — `export --check` + cron
+      `/etc/cron.d/oc-factory` (4×/сутки) + метрика `custom.openclaw.factory.drift`;
+      постоянный деплой `/usr/local/lib/oc-factory/` (заливка `scripts/oc-factory-deploy.ps1`),
+      `/root/oc-factory-e2/` удалён. T5/T6 закрыты: правки агентов — только анкета →
+      `plan` → `apply`, ручные правки конфига запрещены.
+- [ ] Включение modelPolicy.allow для main/service/ksu — отдельным согласованным шагом
+- [ ] E5–E7: мультипроектность OPF-9 на `service` (пилоты только на `service`)

@@ -41,6 +41,10 @@ Nextcloud, BAS-IP Monitor и AI/ML-стеком. Инвентаризация и
 - Эксплуатационный справочник сервера — `/root/RUNBOOK.md` и `/srv/openclaw/RUNBOOK.md` (синхронизация
   с этим репо — долг OPF-3); при расхождении фактов — **сверяться с фактическим состоянием сервера**.
 - Секреты (токены, `/etc/openclaw/env`, `secrets/`) **в доки и коммиты не копировать** — только ссылки на место хранения.
+- **Правки `openclaw.json` — только через «Фабрику агентов»** (OPF-8, E4): анкета `agents/<id>.yaml`
+  → `validate` → `plan` → `apply`; ручные правки конфига запрещены — drift-контроль
+  (`export --check`, cron) засигналит (метрика `custom.openclaw.factory.drift`). Деплой factory —
+  `scripts/oc-factory-deploy.ps1`; формат анкет и команды — [`agents/README.md`](agents/README.md).
 
 ## Команды графа знаний
 

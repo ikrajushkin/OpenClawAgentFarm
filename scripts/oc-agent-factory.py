@@ -5,7 +5,9 @@
 Анкеты agents/*.yaml (git — источник истины) ↔ openclaw.json (производный артефакт).
 
 Команды:
-  export   — openclaw.json → agents/<id>.yaml (verbatim-зеркало управляемых фрагментов)
+  export   — openclaw.json → agents/<id>.yaml (verbatim-зеркало управляемых фрагментов);
+             --check — не писать, сверить анкеты с конфигом (drift-контроль E4: cron,
+             exit 0 = нет дрейфа, exit 2 = дрейф; ловит ручные правки конфига мимо фабрики)
   validate — проверка анкет и библиотек agents/_*.yaml
   plan     — diff «анкета → конфиг» по управляемым поддеревьям; exit 2, если есть изменения
   new      — анкета нового агента из библиотек (stack → model/models/modelPolicy.allow,
@@ -845,17 +847,48 @@ def cmd_destroy(config_path, agents_dir, agent_id, confirm=False,
 
 # ---------------------------------------------------------------- export
 
-def cmd_export(cfg, agents_dir, libs):
+def export_diff(old, doc):
+    """Семантическое сравнение анкеты: old (на диске) vs doc (собрана из конфига).
+    channels сравниваются как множество (порядок строк bindings не важен)."""
+    if not old:
+        return ["анткета отсутствует или не читается"]
+    detail = []
+    for key in sorted(set(doc) | set(old)):
+        a, b = old.get(key), doc.get(key)
+        if key == "channels":
+            norm = lambda lst: sorted(json.dumps(c, sort_keys=True, ensure_ascii=False)
+                                      for c in (lst or []))
+            if norm(a) != norm(b):
+                detail.append(key)
+        elif a != b:
+            detail.append(key)
+    return detail
+
+
+def cmd_export(cfg, agents_dir, libs, check=False):
+    """Анкеты из конфига. check=True — не писать, только сверить (drift-контроль;
+    exit 0 = нет дрейфа, exit 2 = дрейф)."""
     entries = (cfg.get("agents") or {}).get("entries") or {}
     bindings = cfg.get("bindings") or []
     channels = cfg.get("channels") or {}
     claimed_channel_scope = {}
     count = 0
+    drift = 0
 
     for agent_id in sorted(entries):
         entry = copy.deepcopy(entries[agent_id])
         entry.pop("name", None)  # восстанавливается рендером как name := id
         rows = [b for b in bindings if b.get("agentId") == agent_id]
+
+        path = os.path.join(agents_dir, agent_id + ".yaml")
+        old = {}
+        if os.path.exists(path):
+            try:
+                old = load_yaml(path) or {}
+            except yaml.YAMLError:
+                old = {}
+        old_presets = {(c.get("type"), c.get("account")): c.get("preset")
+                       for c in (old.get("channels") or []) if c.get("preset")}
 
         chan_list = []
         for row in rows:
@@ -874,20 +907,14 @@ def cmd_export(cfg, agents_dir, libs):
                 acc = ((channels.get(ctype) or {}).get("accounts") or {}).get(account)
                 settings = copy.deepcopy(acc) if acc is not None else None
             item = {"type": ctype, "account": account}
+            if old_presets.get((ctype, account)):  # аннотацию пресета сохраняем
+                item["preset"] = old_presets[(ctype, account)]
             if settings is not None:
                 item["settings"] = settings
             chan_list.append(item)
 
-        path = os.path.join(agents_dir, agent_id + ".yaml")
-        old = {}
-        if os.path.exists(path):
-            try:
-                old = load_yaml(path) or {}
-            except yaml.YAMLError:
-                old = {}
-
         doc = {"apiVersion": API_VERSION, "kind": KIND, "id": agent_id,
-               "origin": "migrated"}
+               "origin": old.get("origin") or "migrated"}
         for key in ("stack", "role", "toolset", "notes", "projects", "reports"):
             if key in old:  # аннотации сохраняем при перегенерации
                 doc[key] = old[key]
@@ -899,6 +926,17 @@ def cmd_export(cfg, agents_dir, libs):
             if key != "name":
                 doc[key] = val
 
+        count += 1
+        if check:
+            detail = export_diff(old, doc)
+            if detail:
+                drift += 1
+                print("[DRIFT] %s: расхождение по ключам: %s"
+                      % (agent_id, ", ".join(detail)))
+            else:
+                print("[OK] check %s" % agent_id)
+            continue
+
         header = (
             "# Анкета агента «%s» (%s, %s).\n"
             "# Источник истины для agents.entries.%s, route-строк bindings и настроек\n"
@@ -909,8 +947,19 @@ def cmd_export(cfg, agents_dir, libs):
         )
         with open(path, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(dump_yaml(doc, header))
-        count += 1
         print("[OK] export %s -> %s" % (agent_id, path))
+
+    if check:
+        for fname in sorted(os.listdir(agents_dir)):
+            if not fname.endswith(".yaml") or fname.startswith("_"):
+                continue
+            aid = fname[:-5]
+            if aid not in entries:
+                drift += 1
+                print("[DRIFT] %s: анкета есть, записи в agents.entries конфига нет "
+                      "(не применена или удалена мимо фабрики)" % aid)
+        print("export --check: %d анкет(ы) сверено, дрейфов: %d" % (count, drift))
+        return 2 if drift else 0
 
     print("export: %d анкет(ы) записано в %s" % (count, agents_dir))
     return 0
@@ -1178,6 +1227,9 @@ def main(argv=None):
                     help="id агента (new/edit/destroy — один; apply — фильтр)")
     ap.add_argument("--check-secrets", action="store_true",
                     help="validate: проверять существование tokenFile/secretRef")
+    ap.add_argument("--check", action="store_true",
+                    help="export: не писать, сверить анкеты с конфигом "
+                         "(drift-контроль; exit 2 = дрейф)")
     ap.add_argument("--emit-patch", default=None,
                     help="plan: записать patch.json5 + patch.replace-paths.txt в каталог")
     # new
@@ -1229,7 +1281,7 @@ def main(argv=None):
         cfg = json.load(fh)
 
     if args.command == "export":
-        return cmd_export(cfg, args.agents_dir, libs)
+        return cmd_export(cfg, args.agents_dir, libs, check=args.check)
     if args.command == "plan":
         return cmd_plan(cfg, args.agents_dir, libs, args.emit_patch)
     if args.command == "apply":
