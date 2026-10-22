@@ -25,8 +25,10 @@ identity:
   name: Помощник
   emoji: 💬
 model:
-  primary: polza-ksu-ds/deepseek/deepseek-v4.1-flash
+  primary: polza-ksu-ds/xiaomi/mimo-v2.6-pro
   fallbacks:
+  - polza-ksu-ds/deepseek/deepseek-v4-pro-0813
+  - polza-ksu-ds/deepseek/deepseek-v4.1-flash
   - polza-ksu-ds/deepseek/deepseek-v4-flash
   - polza-ksu-ds/deepseek/deepseek-v4-flash-0731
 models:
@@ -39,6 +41,8 @@ models:
           allow_fallbacks: true
   polza-ksu-ds/deepseek/deepseek-v4-flash: {}
   polza-ksu-ds/deepseek/deepseek-v4-flash-0731: {}
+  polza-ksu-ds/deepseek/deepseek-v4-pro-0813: {}
+  polza-ksu-ds/xiaomi/mimo-v2.6-pro: {}
 tools:
   profile: messaging
   alsoAllow:
@@ -47,5 +51,9 @@ tools:
   - web_search
   - web_fetch
 subagents:
-  model: polza-ksu-ds/deepseek/deepseek-v4.1-flash
-thinkingDefault: max
+  model:
+    primary: polza-ksu-ds/xiaomi/mimo-v2.6-pro
+    fallbacks:
+    - polza-ksu-ds/deepseek/deepseek-v4-pro-0813
+    - polza-ksu-ds/deepseek/deepseek-v4.1-flash
+thinkingDefault: medium
