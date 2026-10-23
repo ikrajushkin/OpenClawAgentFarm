@@ -53,6 +53,12 @@ tools:
   alsoAllow:
   - browser
   - message
+sandbox:                 # N5 (2026-10-23): пилот песочницы Docker; глобально mode off, scope session
+  mode: non-main         # все сессии service кроме main; main и ksu не тронуты
+  docker:
+    binds:
+    - /srv/shared/Projects:/srv/shared/Projects:rw   # проекты (E5/E6) вне workspace
+    dangerouslyAllowExternalBindSources: true        # источник вне workspace-roots (док: multiple-folders)
 subagents:
   allowAgents:
   - service
